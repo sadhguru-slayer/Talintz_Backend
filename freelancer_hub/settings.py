@@ -1,4 +1,3 @@
-
 from celery.schedules import crontab
 from pathlib import Path
 from dotenv import load_dotenv
@@ -128,7 +127,7 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOWED_ORIGINS = [
-    'https://talintzbackend-production.up.railway.app',
+    "https://talintzf.netlify.app",
 ]
 CORS_ALLOW_CREDENTIALS = True
 SESSION_COOKIE_SECURE = True
@@ -138,6 +137,7 @@ CSRF_TRUSTED_ORIGINS = [
     'https://talintzbackend-production.up.railway.app',
     'https://*.railway.app'
 ]
+
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
@@ -313,7 +313,6 @@ SESSION_COOKIE_SECURE = False  # Disable secure cookies for development
 CSRF_COOKIE_SECURE = False     # Disable secure CSRF cookies for development
 
 
-
 # Application definition
 
 INSTALLED_APPS = [
@@ -375,7 +374,7 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOWED_ORIGINS = [
-    'https://talintzbackend-production.up.railway.app',
+    "https://talintzf.netlify.app",
 ]
 CORS_ALLOW_CREDENTIALS = True
 SESSION_COOKIE_SECURE = True
@@ -658,7 +657,7 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOWED_ORIGINS = [
-    'https://talintzbackend-production.up.railway.app',
+    "https://talintzf.netlify.app",
 ]
 CORS_ALLOW_CREDENTIALS = True
 SESSION_COOKIE_SECURE = True
@@ -854,3 +853,4 @@ else:
             'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
         }
     }
+
