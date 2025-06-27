@@ -274,12 +274,27 @@ class RegisterView(APIView):
             return None
 
     def post(self, request):
-        data = request.data
+        # Debug: Log incoming request data
+        print("\n=== DEBUG: REGISTER REQUEST DATA ===")
+        print("Raw request data:", request.data)
+        print("Headers:", request.headers)
         
+        data = request.data.copy()  # Create mutable copy
+        
+        # Debug: Log processed data
+        print("\n=== DEBUG: PROCESSED DATA ===")
+        print("Email:", data.get('email'))
+        print("Role:", data.get('role'))
+        print("Password:", bool(data.get('password')))
+        print("Confirm Password:", bool(data.get('confirm_password')))
+        print("Referral Code:", data.get('referral_code', 'None'))
+
         # Validate required fields
         required_fields = ['email', 'password', 'confirm_password', 'role']
         missing_fields = [field for field in required_fields if field not in data]
         if missing_fields:
+            print("\n=== DEBUG: MISSING FIELDS ===")
+            print("Missing:", missing_fields)
             return Response(
                 {"error": f"Missing required fields: {', '.join(missing_fields)}"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -288,7 +303,11 @@ class RegisterView(APIView):
         # Validate email format
         try:
             validate_email(data['email'])
+            print("\n=== DEBUG: EMAIL VALIDATION ===")
+            print("Email is valid.")
         except ValidationError:
+            print("\n=== DEBUG: EMAIL VALIDATION ===")
+            print("Email is invalid.")
             return Response(
                 {"error": "Invalid email format"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -296,46 +315,60 @@ class RegisterView(APIView):
 
         # Check if email exists
         if User.objects.filter(email=data['email']).exists():
+            print("\n=== DEBUG: EMAIL EXISTS ===")
+            print("Email already registered.")
             return Response({
                 "error": "This email is already registered. Please use a different email or login.",
                 "action": "login"
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Validate role
-        if data['role'].lower() not in ['client', 'freelancer', 'student']:
+        valid_roles = ['client', 'freelancer', 'student']
+        if data['role'].lower() not in valid_roles:
+            print("\n=== DEBUG: INVALID ROLE ===")
+            print("Invalid role:", data['role'])
             return Response(
-                {"error": "Invalid role selected."},
+                {"error": f"Invalid role selected. Valid roles: {', '.join(valid_roles)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         # Validate passwords match
         if data['password'] != data['confirm_password']:
+            print("\n=== DEBUG: PASSWORD MISMATCH ===")
+            print("Password and confirm_password do not match.")
             return Response(
                 {"error": "Password and Confirm Password must match."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Handle referral code
+        # Debug: Log referral code handling
         referral_code = data.get('referral_code', '').strip()
-        referrer = None
-        referral_created = False
-        
         if referral_code:
-            referrer = self.validate_referral_code(referral_code)
-            if not referrer:
-                return Response({
-                    "error": "Invalid referral code. Please check and try again."
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Prevent self-referral
-            if referrer.email == data['email']:
-                return Response({
-                    "error": "You cannot refer yourself."
-                }, status=status.HTTP_400_BAD_REQUEST)
+            print("\n=== DEBUG: REFERRAL CODE ===")
+            print("Referral code provided:", referral_code)
         
         try:
-            # Validate password strength
-            validate_password(data.get('password'))
+            # Debug: Log password validation
+            print("\n=== DEBUG: PASSWORD VALIDATION ===")
+            validate_password(data['password'])
+            print("Password is valid.")
+
+            # Handle referral code
+            referrer = None
+            referral_created = False
+            
+            if referral_code:
+                referrer = self.validate_referral_code(referral_code)
+                if not referrer:
+                    return Response({
+                        "error": "Invalid referral code. Please check and try again."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Prevent self-referral
+                if referrer.email == data['email']:
+                    return Response({
+                        "error": "You cannot refer yourself."
+                    }, status=status.HTTP_400_BAD_REQUEST)
             
             # Generate unique username and nickname
             username = self.generate_unique_username(data['email'])
@@ -405,15 +438,14 @@ class RegisterView(APIView):
                 return Response(response_data, status=status.HTTP_201_CREATED)
 
         except ValidationError as e:
+            print("\n=== DEBUG: PASSWORD VALIDATION ERROR ===")
+            print("Password error:", str(e))
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except IntegrityError as e:
-            return Response(
-                {"error": "Registration failed due to database constraint."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
         except Exception as e:
+            print("\n=== DEBUG: UNEXPECTED ERROR ===")
+            print("Error:", str(e))
             return Response(
-                {"error": str(e)},
+                {"error": "Registration failed. Please try again."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
