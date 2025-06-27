@@ -186,20 +186,6 @@ CHANNEL_LAYERS = {
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'your_db_name',
-        'USER': 'your_db_user',
-        'PASSWORD': 'your_db_password',
-        'HOST': 'postgres.railway.app',  # Replace with the correct hostname
-        'PORT': 'your_db_port',
-    }
-}
-
-# Override for Railway (optional but explicit)
-if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
-    DATABASES['default'] = dj_database_url.config(conn_max_age=600)
 
 # CACHES = {
 #     "default": {
@@ -549,16 +535,14 @@ SECURE_SSL_REDIRECT = False    # Disable SSL redirect for development
 SESSION_COOKIE_SECURE = False  # Disable secure cookies for development
 CSRF_COOKIE_SECURE = False     # Disable secure CSRF cookies for development
 
-# Database configuration
-if os.getenv('RAILWAY_ENVIRONMENT'):
-    DATABASES = {
-        'default': dj_database_url.config(default=os.getenv('DATABASE_URL'))
-    }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
-        }
-    }
 
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'HOST': 'shortline.proxy.rlwy.net',  # Hardcode public proxy
+        'PORT': '18928',                     # Hardcode public port
+        'NAME': os.getenv('PGDATABASE'),     # Keep other vars dynamic
+        'USER': os.getenv('PGUSER'),
+        'PASSWORD': os.getenv('PGPASSWORD'),
+    }
+}
