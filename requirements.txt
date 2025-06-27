@@ -38,3 +38,4 @@ pytz==2025.1
 requests==2.32.3
 razorpay==1.4.2
 setuptools==80.0.0
+dj-database-url==2.1.0

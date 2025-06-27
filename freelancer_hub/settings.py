@@ -13,6 +13,7 @@ from celery.schedules import crontab
 from pathlib import Path
 from dotenv import load_dotenv
 import os
+import dj_database_url
 
 # Load .env from project root (2 levels up from settings.py)
 env_path = Path(__file__).resolve().parent.parent / '.env'
@@ -21,6 +22,8 @@ load_dotenv(env_path)  # Explicitly specify path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Use dj-database-url to parse DATABASE_URL (add to top of settings.py)
+import dj_database_url
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
@@ -156,10 +159,10 @@ CHANNEL_LAYERS = {
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default='sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite3'),  # Fallback to SQLite if DATABASE_URL is missing
+        conn_max_age=600,  # Optional: Improves performance
+    )
 }
 
 # CACHES = {
