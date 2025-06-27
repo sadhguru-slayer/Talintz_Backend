@@ -187,10 +187,14 @@ CHANNEL_LAYERS = {
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
-    'default': dj_database_url.config(
-        default='sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite3'),  # Fallback for local dev
-        conn_max_age=600,
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'your_db_name',
+        'USER': 'your_db_user',
+        'PASSWORD': 'your_db_password',
+        'HOST': 'postgres.railway.app',  # Replace with the correct hostname
+        'PORT': 'your_db_port',
+    }
 }
 
 # Override for Railway (optional but explicit)
@@ -429,16 +433,6 @@ CHANNEL_LAYERS = {
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default='sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite3'),  # Fallback for local dev
-        conn_max_age=600,
-    )
-}
-
-# Override for Railway (optional but explicit)
-if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
-    DATABASES['default'] = dj_database_url.config(conn_max_age=600)
 
 # CACHES = {
 #     "default": {
