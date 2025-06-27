@@ -1,0 +1,285 @@
+from rest_framework import serializers
+from .models import ClientProfile,FreelancerProfile,Feedback, Address, CompanyDetails
+from core.models import Connection
+from django.contrib.auth import get_user_model
+import json
+from datetime import datetime
+from django.utils import timezone
+from rest_framework.response import Response
+from rest_framework import status
+
+User = get_user_model()  # This will point to your custom User model if defined
+
+class ClientProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ClientProfile
+        fields = '__all__'
+
+class AddressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Address
+        fields = '__all__'
+        extra_kwargs = {
+            'street_address': {'required': True},
+            'city': {'required': True},
+            'state': {'required': True},
+            'country': {'required': True},
+            'postal_code': {'required': True},
+            'address_type': {'required': False, 'default': 'registered'},
+            'is_primary': {'required': False, 'default': False},
+            'verified': {'required': False, 'default': False}
+        }
+
+class CompanyDetailsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyDetails
+        fields = '__all__'
+
+class ClientProfilePartialUpdateSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source='user.username', read_only=True)
+    addresses = serializers.ListField(required=False, allow_empty=True)
+    business_preferences = serializers.DictField(required=False, allow_empty=True)
+
+    class Meta:
+        model = ClientProfile
+        fields = [
+            'name', 'bio', 'description', 'profile_picture', 'cover_photo', 'gender', 'dob',
+            'primary_email', 'secondary_email', 'phone_number', 'alternate_phone',
+            'addresses', 'business_preferences',
+            'email_verified', 'phone_verified', 'identity_verified', 'profile_status',
+            'account_tier', 'terms_accepted', 'privacy_policy_accepted',
+            'preferred_payment_method', 'budget_range'
+        ]
+
+    def update(self, instance, validated_data):
+        try:
+            # Handle addresses
+            if 'addresses' in validated_data:
+                addresses_data = validated_data.pop('addresses')
+                
+                # Unwrap nested list if necessary
+                if isinstance(addresses_data, list) and len(addresses_data) > 0 and isinstance(addresses_data[0], list):
+                    addresses_data = addresses_data[0]
+                
+                print(addresses_data)  # Debugging: Check the unwrapped data
+                
+                # Create new addresses
+                for address_data in addresses_data:
+                    if isinstance(address_data, dict):
+                        print(address_data)  # Debugging: Check individual address data
+                        try:
+                            # Check if address already exists by ID
+                            address_id = address_data.get('id')
+                            if address_id:
+                                address = Address.objects.filter(id=address_id).first()
+                                if address:
+                                    # Update existing address
+                                    for field, value in address_data.items():
+                                        setattr(address, field, value)
+                                    address.save()
+                                else:
+                                    # Create new address if ID is provided but not found
+                                    address = Address.objects.create(**address_data)
+                            else:
+                                # Create new address if no ID is provided
+                                address = Address.objects.create(**address_data)
+                            
+                            instance.addresses.add(address)
+                        except Exception as e:
+                            print(f"Error creating/updating address: {str(e)}")
+
+            # Handle business preferences
+            if 'business_preferences' in validated_data:
+                business_prefs = validated_data.pop('business_preferences')
+                if isinstance(business_prefs, dict):
+                    instance.preferred_payment_method = business_prefs.get(
+                        'preferred_payment_method', instance.preferred_payment_method)
+                    instance.budget_range = business_prefs.get(
+                        'budget_range', instance.budget_range)
+                    instance.project_preferences = business_prefs.get(
+                        'project_preferences', instance.project_preferences or {})
+
+            # Update remaining fields
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+
+            instance.save()
+            print("Profile update completed successfully")
+            return instance
+
+        except Exception as e:
+            print(f"Error in update method: {str(e)}")
+            raise serializers.ValidationError(f"Error updating profile: {str(e)}")
+
+
+class FreelancerProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FreelancerProfile
+        fields = '__all__'
+
+class ClientFeedbackSerializer(serializers.ModelSerializer):
+    from_user_username = serializers.CharField(source='from_user.username', read_only=True)
+    from_user_role = serializers.CharField(source='from_user.role', read_only=True)
+    to_user_username = serializers.CharField(source='to_user.username', read_only=True)
+    to_user_role = serializers.CharField(source='to_user.role', read_only=True)
+    project_title = serializers.CharField(source='project.title', read_only=True)
+    
+    replies = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Feedback
+        fields = [
+            'id',
+            'from_user',  # Foreign key relation (if needed)
+            'from_user_role',  # Foreign key relation (if needed)
+            'to_user',  # Foreign key relation (if needed)
+            'to_user_role',  # Foreign key relation (if needed)
+            'from_user_username',  # Freelancer's username
+            'to_user_username',  # Freelancer's username
+            'rating',  # Rating for the review
+            'feedback',  # Review text
+            'created_at',  # Date the review was created
+            'project_title',  # Project title associated with the review
+            'parent_feedback',  # The parent feedback (for replies)
+            'replies',  # Nested replies
+        ]
+        read_only_fields = ['from_user_username', 'project_title', 'parent_feedback']
+
+    def get_replies(self, obj):
+        # Only include direct replies, and avoid infinite recursion.
+        if obj.parent_feedback:
+            return []  # Don't serialize replies for replies.
+        
+        replies = obj.replies.all()
+        return ClientFeedbackSerializer(replies, many=True).data
+
+
+class UserProfileSerializer(serializers.Serializer):
+    def to_representation(self, instance):
+        # Check if the user is a freelancer
+        if instance.role == 'freelancer':
+            try:
+                profile = FreelancerProfile.objects.get(user=instance)
+                user_name = instance.username
+                result = {
+                    'user_name': user_name,
+                    'id': instance.id,
+                    'bio': profile.bio,  # Get bio from FreelancerProfile
+                    'profile_picture': profile.profile_picture.url if profile.profile_picture else None,  # Get profile picture
+                    'rating': profile.average_rating,  # Freelancer rating
+                }
+                return result
+            except FreelancerProfile.DoesNotExist:
+                # Return an empty dictionary or a default profile if it does not exist
+                return {"message": "Freelancer profile not found"}
+        
+        # Check if the user is a client
+        elif instance.role == 'client':
+            try:
+                profile = ClientProfile.objects.get(user=instance)
+                user_name = instance.username
+                result = {
+                    'user_name': user_name,
+                    'id': instance.id,
+                    'bio': profile.bio,  # Get bio from ClientProfile
+                    'profile_picture': profile.profile_picture.url if profile.profile_picture else None,  # Get profile picture
+                    'company': profile.company_name,  # Client's company name
+                }
+                return result
+            except ClientProfile.DoesNotExist:
+                # Return an empty dictionary or a default profile if it does not exist
+                return {"message": "Client profile not found"}
+        
+        # Default case if the user has no role or something unexpected
+        return {"message": "Profile data unavailable"}
+
+
+
+class ConnectionSendinSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Connection
+        fields = ['from_user', 'to_user', 'status', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        # Get the original representation
+        representation = super().to_representation(instance)
+
+        # Extract the 'from_user' and 'to_user'
+        from_user = instance.from_user
+        to_user = instance.to_user
+
+        # Helper function to get the profile data
+        def get_user_profile(user):
+            if user.role == 'client':
+                # Check if 'client_profile' exists
+                if hasattr(user, 'client_profile'):
+                    return {
+                        "user_name": user.username,
+                        "user_id": user.id,
+                        "bio": user.client_profile.bio,  # 'bio' from ClientProfile
+                        "company": user.client_profile.company_name,  # 'company_name' from ClientProfile
+                        "rating": user.client_profile.average_rating,  # 'average_rating' from ClientProfile
+                        "role": user.role
+                    }
+                else:
+                    return {
+                        "user_name": user.username,
+                        "user_id": user.id,
+                        "bio": "",  # Empty bio if client_profile does not exist
+                        "company": "",  # Empty company if client_profile does not exist
+                        "rating": 0,  # Default rating if client_profile does not exist
+                        "role": user.role
+                    }
+
+            elif user.role == 'freelancer':
+                # Check if 'freelancer_profile' exists
+                if hasattr(user, 'freelancer_profile'):
+                    return {
+                        "user_name": user.username,
+                        "user_id": user.id,
+                        "bio": user.freelancer_profile.bio,  # 'bio' from FreelancerProfile
+                        "company": user.freelancer_profile.company_name,  # 'company_name' from FreelancerProfile
+                        "rating": user.freelancer_profile.average_rating,  # 'average_rating' from FreelancerProfile
+                        "role": user.role
+                    }
+                else:
+                    return {
+                        "user_name": user.username,
+                        "user_id": user.id,
+                        "bio": "",  # Empty bio if freelancer_profile does not exist
+                        "company": "",  # Empty company if freelancer_profile does not exist
+                        "rating": 0,  # Default rating if freelancer_profile does not exist
+                        "role": user.role
+                    }
+
+        # Determine which user to return (opposite user based on who the current user is)
+        current_user = self.context.get('request').user
+        if current_user == from_user:
+            opposite_user = to_user
+        else:
+            opposite_user = from_user
+
+        # Get the profile of the opposite user
+        opposite_user_profile = get_user_profile(opposite_user)
+
+        # Return the response with the opposite user's profile and connection details
+        return {
+            "id":instance.id,
+            "user_name": opposite_user_profile.get('user_name'),
+            "user_id": opposite_user_profile.get('user_id'),
+            "company": opposite_user_profile.get('company'),
+            "rating": opposite_user_profile.get('rating'),
+            "bio": opposite_user_profile.get('bio'),
+            "role": opposite_user_profile.get('role'),
+            "status": representation.get('status'),
+            "created_at": representation.get('created_at'),
+            "updated_at": representation.get('updated_at')
+        }
+    
+
+class ConnectionRequestSerializer(serializers.ModelSerializer):
+    from_user_username = serializers.CharField(source='from_user.username', read_only=True)
+
+    class Meta:
+        model = Connection
+        fields = ['from_user','from_user_username','id', 'status', 'created_at', 'updated_at']

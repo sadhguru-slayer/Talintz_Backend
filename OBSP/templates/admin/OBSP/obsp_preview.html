@@ -1,0 +1,275 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}
+<style>
+    body {
+        background: #f8f9fa;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .preview-container {
+        max-width: 800px;
+        margin: 40px auto;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+    .preview-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        text-align: center;
+    }
+    .preview-header h1 {
+        margin: 0;
+        font-size: 28px;
+        font-weight: 600;
+    }
+    .preview-header p {
+        margin: 10px 0 0 0;
+        opacity: 0.9;
+        font-size: 16px;
+    }
+    .preview-content {
+        padding: 40px;
+    }
+    .field-group {
+        margin-bottom: 25px;
+    }
+    .field-label {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 8px;
+        font-size: 16px;
+    }
+    .field-required {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    .field-help {
+        color: #6c757d;
+        font-size: 14px;
+        margin-bottom: 8px;
+        font-style: italic;
+    }
+    .field-input {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.2s;
+    }
+    .field-input:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+    .field-textarea {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        font-size: 16px;
+        min-height: 100px;
+        resize: vertical;
+        transition: border-color 0.2s;
+    }
+    .field-textarea:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+    .field-options {
+        margin-top: 10px;
+    }
+    .field-option {
+        margin-bottom: 8px;
+        padding: 8px 12px;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        background: #f8f9fa;
+        transition: all 0.2s;
+    }
+    .field-option:hover {
+        background: #e9ecef;
+        border-color: #667eea;
+    }
+    .field-option input[type="radio"],
+    .field-option input[type="checkbox"] {
+        margin-right: 8px;
+    }
+    .option-price {
+        background: #28a745;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 8px;
+        font-size: 11px;
+        margin-left: 8px;
+        font-weight: bold;
+    }
+    .option-no-price {
+        color: #6c757d;
+        font-size: 11px;
+        margin-left: 8px;
+        font-style: italic;
+    }
+    .total-price {
+        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 12px;
+        text-align: center;
+        font-size: 20px;
+        font-weight: bold;
+        margin-top: 30px;
+    }
+    .back-button {
+        background: #6c757d;
+        color: white;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        text-decoration: none;
+        display: inline-block;
+        margin-bottom: 20px;
+        transition: background-color 0.2s;
+    }
+    .back-button:hover {
+        background: #5a6268;
+        color: white;
+        text-decoration: none;
+    }
+    .placeholder-text {
+        color: #6c757d;
+        font-style: italic;
+    }
+    .pricing-summary {
+        background: #e8f5e8;
+        border: 1px solid #28a745;
+        border-radius: 8px;
+        padding: 15px;
+        margin-top: 20px;
+    }
+    .pricing-summary h4 {
+        color: #155724;
+        margin: 0 0 10px 0;
+    }
+    .pricing-item {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+        font-size: 14px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="preview-container">
+    <div class="preview-header">
+        <h1>{{ obsp.title }}</h1>
+        <p>{{ obsp.description }}</p>
+    </div>
+    
+    <div class="preview-content">
+        <a href="{% url 'admin:OBSP_obsp_template_change' obsp.id %}" class="back-button">
+            ← Back to Edit
+        </a>
+        
+        <form>
+            {% for field in obsp.fields.all %}
+            <div class="field-group">
+                <div class="field-label">
+                    {{ field.label }}
+                    {% if field.is_required %}
+                        <span class="field-required">*</span>
+                    {% endif %}
+                </div>
+                
+                {% if field.help_text %}
+                    <div class="field-help">{{ field.help_text }}</div>
+                {% endif %}
+                
+                {% if field.field_type == 'text' %}
+                    <input type="text" class="field-input" placeholder="{{ field.placeholder|default:'Enter text...' }}">
+                {% elif field.field_type == 'textarea' %}
+                    <textarea class="field-textarea" placeholder="{{ field.placeholder|default:'Enter text...' }}"></textarea>
+                {% elif field.field_type == 'number' %}
+                    <input type="number" class="field-input" placeholder="{{ field.placeholder|default:'Enter number...' }}">
+                {% elif field.field_type == 'email' %}
+                    <input type="email" class="field-input" placeholder="{{ field.placeholder|default:'Enter email...' }}">
+                {% elif field.field_type == 'phone' %}
+                    <input type="tel" class="field-input" placeholder="{{ field.placeholder|default:'Enter phone...' }}">
+                {% elif field.field_type == 'date' %}
+                    <input type="date" class="field-input">
+                {% elif field.field_type == 'radio' %}
+                    <div class="field-options">
+                        {% for option in field.get_options_with_pricing %}
+                            <div class="field-option">
+                                <input type="radio" name="field_{{ field.id }}" id="field_{{ field.id }}_{{ forloop.counter }}" value="{{ option.text }}">
+                                <label for="field_{{ field.id }}_{{ forloop.counter }}">
+                                    {{ option.text }}
+                                    {% if option.price > 0 %}
+                                        <span class="option-price">+₹{{ option.price|floatformat:0 }}</span>
+                                    {% else %}
+                                        <span class="option-no-price">No additional cost</span>
+                                    {% endif %}
+                                </label>
+                            </div>
+                        {% empty %}
+                            <div class="placeholder-text">No options defined</div>
+                        {% endfor %}
+                    </div>
+                {% elif field.field_type == 'checkbox' %}
+                    <div class="field-options">
+                        {% for option in field.get_options_with_pricing %}
+                            <div class="field-option">
+                                <input type="checkbox" name="field_{{ field.id }}" id="field_{{ field.id }}_{{ forloop.counter }}" value="{{ option.text }}">
+                                <label for="field_{{ field.id }}_{{ forloop.counter }}">
+                                    {{ option.text }}
+                                    {% if option.price > 0 %}
+                                        <span class="option-price">+₹{{ option.price|floatformat:0 }}</span>
+                                    {% else %}
+                                        <span class="option-no-price">No additional cost</span>
+                                    {% endif %}
+                                </label>
+                            </div>
+                        {% empty %}
+                            <div class="placeholder-text">No options defined</div>
+                        {% endfor %}
+                    </div>
+                {% elif field.field_type == 'select' %}
+                    <select class="field-input">
+                        <option value="">{{ field.placeholder|default:'Select an option...' }}</option>
+                        {% for option in field.get_options_with_pricing %}
+                            <option value="{{ option.text }}">
+                                {{ option.display }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                {% elif field.field_type == 'file' %}
+                    <input type="file" class="field-input">
+                {% endif %}
+            </div>
+            {% endfor %}
+            
+            <div class="pricing-summary">
+                <h4>💰 Pricing Summary</h4>
+                <div class="pricing-item">
+                    <span>Base Price:</span>
+                    <span>₹{{ obsp.base_price|floatformat:0 }}</span>
+                </div>
+                <div class="pricing-item">
+                    <span>Additional Options:</span>
+                    <span>₹0 (select options above)</span>
+                </div>
+                <div class="pricing-item" style="font-weight: bold; border-top: 1px solid #28a745; padding-top: 5px;">
+                    <span>Total Estimated:</span>
+                    <span>₹{{ obsp.base_price|floatformat:0 }}</span>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %} 

@@ -1,0 +1,462 @@
+{% load i18n admin_urls static admin_modify %}
+<div class="js-inline-admin-formset inline-group" id="{{ inline_admin_formset.formset.prefix }}-group"
+     data-inline-type="tabular"
+     data-inline-formset="{{ inline_admin_formset.inline_formset_data }}">
+  <div class="tabular inline-related {% if forloop.last %}last-related{% endif %}">
+{{ inline_admin_formset.formset.management_form }}
+<fieldset class="module {{ inline_admin_formset.classes }}">
+   <h2>{{ inline_admin_formset.opts.verbose_name_plural|capfirst }}</h2>
+   {{ inline_admin_formset.formset.non_form_errors }}
+   <div class="obsp-fields-grid">
+     <!-- Header Row -->
+     <div class="obsp-field-header">
+       <div class="field-cell field-type">Field Type</div>
+       <div class="field-cell field-label">Label</div>
+       <div class="field-cell field-placeholder">Placeholder</div>
+       <div class="field-cell field-help">Help Text</div>
+       <div class="field-cell field-required">Required</div>
+       <div class="field-cell field-price">Price Impact</div>
+       <div class="field-cell field-order">Order</div>
+       <div class="field-cell field-options">Options</div>
+       <div class="field-cell field-actions">Actions</div>
+     </div>
+     
+     <!-- Form Rows -->
+     {% for inline_admin_form in inline_admin_formset %}
+       <div class="obsp-field-row" id="{{ inline_admin_formset.formset.prefix }}-{% if not forloop.last %}{{ forloop.counter0 }}{% else %}empty{% endif %}">
+         {% if inline_admin_form.form.non_field_errors %}
+           <div class="errors">{{ inline_admin_form.form.non_field_errors }}</div>
+         {% endif %}
+         
+         <!-- Field Type -->
+         <div class="field-cell field-type">
+           <div class="field-wrapper">
+             <label class="field-label">Type:</label>
+             {{ inline_admin_form.form.field_type }}
+             {% if inline_admin_form.form.field_type.errors %}
+               <div class="field-error">{{ inline_admin_form.form.field_type.errors }}</div>
+             {% endif %}
+           </div>
+         </div>
+         
+         <!-- Label -->
+         <div class="field-cell field-label">
+           <div class="field-wrapper">
+             <label class="field-label">Label:</label>
+             {{ inline_admin_form.form.label }}
+             {% if inline_admin_form.form.label.errors %}
+               <div class="field-error">{{ inline_admin_form.form.label.errors }}</div>
+             {% endif %}
+           </div>
+         </div>
+         
+         <!-- Placeholder -->
+         <div class="field-cell field-placeholder">
+           <div class="field-wrapper">
+             <label class="field-label">Placeholder:</label>
+             {{ inline_admin_form.form.placeholder }}
+             {% if inline_admin_form.form.placeholder.errors %}
+               <div class="field-error">{{ inline_admin_form.form.placeholder.errors }}</div>
+             {% endif %}
+           </div>
+         </div>
+         
+         <!-- Help Text -->
+         <div class="field-cell field-help">
+           <div class="field-wrapper">
+             <label class="field-label">Help Text:</label>
+             {{ inline_admin_form.form.help_text }}
+             {% if inline_admin_form.form.help_text.errors %}
+               <div class="field-error">{{ inline_admin_form.form.help_text.errors }}</div>
+             {% endif %}
+           </div>
+         </div>
+         
+         <!-- Required -->
+         <div class="field-cell field-required">
+           <div class="field-wrapper">
+             <label class="field-label">Required:</label>
+             <div class="checkbox-wrapper">
+               {{ inline_admin_form.form.is_required }}
+               <span class="checkbox-label">Yes</span>
+             </div>
+             {% if inline_admin_form.form.is_required.errors %}
+               <div class="field-error">{{ inline_admin_form.form.is_required.errors }}</div>
+             {% endif %}
+           </div>
+         </div>
+         
+         <!-- Price Impact -->
+         <div class="field-cell field-price">
+           <div class="field-wrapper">
+             <label class="field-label">Price Impact:</label>
+             <div class="price-wrapper">
+               {{ inline_admin_form.form.has_price_impact }}
+               <span class="checkbox-label">Has Impact</span>
+               {{ inline_admin_form.form.price_impact }}
+             </div>
+             {% if inline_admin_form.form.price_impact.errors %}
+               <div class="field-error">{{ inline_admin_form.form.price_impact.errors }}</div>
+             {% endif %}
+           </div>
+         </div>
+         
+         <!-- Order -->
+         <div class="field-cell field-order">
+           <div class="field-wrapper">
+             <label class="field-label">Order:</label>
+             {{ inline_admin_form.form.order }}
+             {% if inline_admin_form.form.order.errors %}
+               <div class="field-error">{{ inline_admin_form.form.order.errors }}</div>
+             {% endif %}
+           </div>
+         </div>
+         
+         <!-- Options -->
+         <div class="field-cell field-options">
+           <div class="field-wrapper">
+             <label class="field-label">Options:</label>
+             {{ inline_admin_form.form.options_text }}
+             {% if inline_admin_form.form.options_text.errors %}
+               <div class="field-error">{{ inline_admin_form.form.options_text.errors }}</div>
+             {% endif %}
+             <div class="field-help">{{ inline_admin_form.form.options_text.help_text|safe }}</div>
+           </div>
+         </div>
+         
+         <!-- Actions -->
+         <div class="field-cell field-actions">
+           <div class="field-wrapper">
+             {% if inline_admin_form.original %}
+               <div class="action-buttons">
+                 <a href="#" class="delete-button" onclick="return confirm('Are you sure?')">Delete</a>
+               </div>
+             {% endif %}
+           </div>
+         </div>
+         
+         <!-- Hidden Fields -->
+         {% for fieldset in inline_admin_form %}
+           {% for line in fieldset %}
+             {% for field in line %}
+               {% if field.is_hidden %}
+                 {{ field.field }}
+               {% endif %}
+             {% endfor %}
+           {% endfor %}
+         {% endfor %}
+       </div>
+     {% endfor %}
+   </div>
+   
+   <!-- Add Row Button -->
+   <div class="add-row">
+     <a href="#" class="add-button">Add Another Field</a>
+   </div>
+</fieldset>
+</div>
+</div>
+
+<style>
+/* Grid Layout Styles */
+.obsp-fields-grid {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.obsp-field-header {
+    display: grid;
+    grid-template-columns: 120px 200px 150px 200px 100px 150px 80px 250px 100px;
+    gap: 10px;
+    background: #e3f2fd;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 15px;
+    font-weight: bold;
+    color: #1976d2;
+    border: 1px solid #bbdefb;
+}
+
+.obsp-field-row {
+    display: grid;
+    grid-template-columns: 120px 200px 150px 200px 100px 150px 80px 250px 100px;
+    gap: 10px;
+    background: white;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    border: 1px solid #e0e0e0;
+    transition: all 0.2s ease;
+}
+
+.obsp-field-row:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border-color: #2196f3;
+}
+
+.field-cell {
+    display: flex;
+    flex-direction: column;
+}
+
+.field-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.field-label {
+    font-size: 11px;
+    color: #666;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.field-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    box-sizing: border-box;
+}
+
+.field-input:focus {
+    border-color: #2196f3;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+/* Field Type Specific Styling */
+.field-type select {
+    background: #e3f2fd;
+    border-color: #2196f3;
+}
+
+.field-label input {
+    background: #fff3cd;
+    border-color: #ffc107;
+}
+
+.field-placeholder input {
+    background: #f8f9fa;
+    border-color: #6c757d;
+}
+
+.field-help input {
+    background: #e8f5e8;
+    border-color: #28a745;
+}
+
+.field-order input {
+    background: #f8f9fa;
+    border-color: #6c757d;
+    text-align: center;
+}
+
+.field-price input[type="number"] {
+    background: #d4edda;
+    border-color: #28a745;
+    width: 80px;
+}
+
+/* Checkbox Styling */
+.checkbox-wrapper, .price-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.checkbox-wrapper input[type="checkbox"],
+.price-wrapper input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+.checkbox-label {
+    font-size: 11px;
+    color: #666;
+}
+
+/* Options Field */
+.field-options textarea {
+    background: #fff3cd;
+    border-color: #ffc107;
+    resize: vertical;
+    min-height: 60px;
+}
+
+.field-help {
+    font-size: 10px;
+    color: #666;
+    line-height: 1.2;
+    margin-top: 2px;
+}
+
+/* Action Buttons */
+.action-buttons {
+    display: flex;
+    gap: 5px;
+}
+
+.delete-button {
+    background: #dc3545;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 3px;
+    text-decoration: none;
+    font-size: 11px;
+    transition: background-color 0.2s;
+}
+
+.delete-button:hover {
+    background: #c82333;
+    color: white;
+    text-decoration: none;
+}
+
+/* Add Row Button */
+.add-row {
+    text-align: center;
+    margin-top: 20px;
+}
+
+.add-button {
+    background: #28a745;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background-color 0.2s;
+}
+
+.add-button:hover {
+    background: #218838;
+    color: white;
+    text-decoration: none;
+}
+
+/* Error Styling */
+.field-error {
+    color: #dc3545;
+    font-size: 10px;
+    margin-top: 2px;
+}
+
+/* Responsive Design */
+@media (max-width: 1400px) {
+    .obsp-field-header,
+    .obsp-field-row {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .obsp-field-header {
+        display: none;
+    }
+    
+    .field-cell {
+        border-bottom: 1px solid #eee;
+        padding-bottom: 10px;
+    }
+    
+    .field-cell:last-child {
+        border-bottom: none;
+    }
+}
+
+/* Animation */
+.obsp-field-row {
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Field Type Icons */
+.field-type select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+}
+
+/* Hover Effects */
+.obsp-field-row:hover .field-input {
+    border-color: #2196f3;
+}
+
+.obsp-field-row:hover .field-label {
+    color: #2196f3;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-resize textareas
+    const textareas = document.querySelectorAll('textarea');
+    textareas.forEach(textarea => {
+        textarea.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = this.scrollHeight + 'px';
+        });
+    });
+    
+    // Show/hide options field based on field type
+    const fieldTypeSelects = document.querySelectorAll('select[name*="field_type"]');
+    fieldTypeSelects.forEach(select => {
+        select.addEventListener('change', function() {
+            const row = this.closest('.obsp-field-row');
+            const optionsCell = row.querySelector('.field-options');
+            const optionTypes = ['radio', 'checkbox', 'select'];
+            
+            if (optionTypes.includes(this.value)) {
+                optionsCell.style.display = 'block';
+                optionsCell.style.background = '#fff3cd';
+            } else {
+                optionsCell.style.display = 'none';
+                optionsCell.style.background = '#f8f9fa';
+            }
+        });
+    });
+    
+    // Initialize field type change on page load
+    fieldTypeSelects.forEach(select => {
+        select.dispatchEvent(new Event('change'));
+    });
+    
+    // Price impact toggle
+    const priceCheckboxes = document.querySelectorAll('input[name*="has_price_impact"]');
+    priceCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const row = this.closest('.obsp-field-row');
+            const priceInput = row.querySelector('input[name*="price_impact"]');
+            
+            if (this.checked) {
+                priceInput.style.display = 'block';
+                priceInput.style.background = '#d4edda';
+            } else {
+                priceInput.style.display = 'none';
+                priceInput.style.background = '#f8f9fa';
+            }
+        });
+    });
+    
+    // Initialize price impact on page load
+    priceCheckboxes.forEach(checkbox => {
+        checkbox.dispatchEvent(new Event('change'));
+    });
+});
+</script> 

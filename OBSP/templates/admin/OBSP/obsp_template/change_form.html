@@ -1,0 +1,301 @@
+{% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    /* Grid Layout for OBSP Fields */
+    .inline-group {
+        overflow-x: auto;
+    }
+    
+    .inline-related {
+        margin-bottom: 20px;
+    }
+    
+    .inline-related h3 {
+        background: #f8f9fa;
+        padding: 10px 15px;
+        border-radius: 5px;
+        border-left: 4px solid #007bff;
+        margin-bottom: 15px;
+    }
+    
+    /* Field Grid Layout */
+    .form-row {
+        display: grid;
+        grid-template-columns: 120px 200px 180px 250px 80px 100px 80px 300px;
+        gap: 10px;
+        align-items: start;
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+        background: #fafafa;
+        border-radius: 5px;
+        margin-bottom: 5px;
+    }
+    
+    .form-row:first-child {
+        background: #e3f2fd;
+        font-weight: bold;
+        border-bottom: 2px solid #2196f3;
+    }
+    
+    .form-row .field-box {
+        margin: 0;
+    }
+    
+    .form-row .field-box label {
+        font-size: 11px;
+        color: #666;
+        margin-bottom: 2px;
+        display: block;
+    }
+    
+    .form-row .field-box input,
+    .form-row .field-box select,
+    .form-row .field-box textarea {
+        width: 100% !important;
+        box-sizing: border-box;
+        padding: 5px 8px;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+        font-size: 12px;
+    }
+    
+    .form-row .field-box textarea {
+        resize: vertical;
+        min-height: 60px;
+    }
+    
+    /* Checkbox styling */
+    .form-row .field-box input[type="checkbox"] {
+        width: auto !important;
+        margin-top: 8px;
+    }
+    
+    /* Help text styling */
+    .help {
+        font-size: 10px;
+        color: #666;
+        margin-top: 2px;
+        line-height: 1.2;
+    }
+    
+    /* Add button styling */
+    .add-row {
+        background: #28a745;
+        color: white;
+        padding: 8px 15px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-top: 10px;
+    }
+    
+    .add-row:hover {
+        background: #218838;
+    }
+    
+    /* Delete button styling */
+    .delete {
+        background: #dc3545;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        padding: 2px 6px;
+        font-size: 10px;
+        cursor: pointer;
+    }
+    
+    .delete:hover {
+        background: #c82333;
+    }
+    
+    /* Options field special styling */
+    .field-options_text textarea {
+        background: #fff3cd;
+        border-color: #ffc107;
+    }
+    
+    /* Price impact field styling */
+    .field-price_impact input {
+        background: #d4edda;
+        border-color: #28a745;
+    }
+    
+    /* Required field styling */
+    .field-is_required input:checked + label {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    
+    /* Responsive design */
+    @media (max-width: 1200px) {
+        .form-row {
+            grid-template-columns: 1fr;
+            gap: 5px;
+        }
+        
+        .form-row:first-child {
+            display: none;
+        }
+        
+        .form-row .field-box {
+            margin-bottom: 10px;
+        }
+        
+        .form-row .field-box label {
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+    }
+    
+    /* Field type specific styling */
+    .field-field_type select {
+        background: #e3f2fd;
+        border-color: #2196f3;
+    }
+    
+    .field-label input {
+        background: #fff3cd;
+        border-color: #ffc107;
+    }
+    
+    .field-placeholder input {
+        background: #f8f9fa;
+        border-color: #6c757d;
+    }
+    
+    .field-help_text input {
+        background: #e8f5e8;
+        border-color: #28a745;
+    }
+    
+    .field-order input {
+        background: #f8f9fa;
+        border-color: #6c757d;
+        text-align: center;
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-resize textareas
+    const textareas = document.querySelectorAll('textarea');
+    textareas.forEach(textarea => {
+        textarea.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = this.scrollHeight + 'px';
+        });
+    });
+    
+    // Show/hide options field based on field type
+    const fieldTypeSelects = document.querySelectorAll('select[name*="field_type"]');
+    fieldTypeSelects.forEach(select => {
+        select.addEventListener('change', function() {
+            const row = this.closest('.form-row');
+            const optionsField = row.querySelector('.field-options_text');
+            const optionTypes = ['radio', 'checkbox', 'select'];
+            
+            if (optionTypes.includes(this.value)) {
+                optionsField.style.display = 'block';
+                optionsField.style.background = '#fff3cd';
+            } else {
+                optionsField.style.display = 'none';
+                optionsField.style.background = '#f8f9fa';
+            }
+        });
+    });
+    
+    // Initialize field type change on page load
+    fieldTypeSelects.forEach(select => {
+        select.dispatchEvent(new Event('change'));
+    });
+});
+</script>
+{% endblock %}
+
+{% block content %}
+{{ block.super }}
+
+{% if original %}
+<div class="obsp-preview">
+    <h3>📋 OBSP Form Preview</h3>
+    <p style="color: #6c757d; margin-bottom: 20px;">This is how your OBSP form will appear to clients:</p>
+    
+    <div class="base-price">
+        Base Price: ₹{{ original.base_price|floatformat:0 }}
+    </div>
+    
+    <div class="field-preview-content">
+        {% for field in original.fields.all %}
+        <div class="field-preview">
+            <div class="field-label">
+                {{ field.label }}
+                {% if field.is_required %}
+                    <span class="field-required">*</span>
+                {% endif %}
+                <span class="field-type">{{ field.get_field_type_display }}</span>
+                {% if field.has_price_impact %}
+                    <span class="price-impact">+₹{{ field.price_impact|floatformat:0 }}</span>
+                {% endif %}
+            </div>
+            
+            {% if field.help_text %}
+                <div class="field-help">{{ field.help_text }}</div>
+            {% endif %}
+            
+            {% if field.field_type == 'text' %}
+                <input type="text" class="field-input" placeholder="{{ field.placeholder|default:'Enter text...' }}" readonly>
+            {% elif field.field_type == 'textarea' %}
+                <textarea class="field-textarea" placeholder="{{ field.placeholder|default:'Enter text...' }}" readonly></textarea>
+            {% elif field.field_type == 'number' %}
+                <input type="number" class="field-input" placeholder="{{ field.placeholder|default:'Enter number...' }}" readonly>
+            {% elif field.field_type == 'email' %}
+                <input type="email" class="field-input" placeholder="{{ field.placeholder|default:'Enter email...' }}" readonly>
+            {% elif field.field_type == 'phone' %}
+                <input type="tel" class="field-input" placeholder="{{ field.placeholder|default:'Enter phone...' }}" readonly>
+            {% elif field.field_type == 'date' %}
+                <input type="date" class="field-input" readonly>
+            {% elif field.field_type == 'radio' %}
+                <div class="field-options">
+                    {% for option in field.options %}
+                        <div class="field-option">
+                            <input type="radio" name="preview_{{ field.id }}" id="preview_{{ field.id }}_{{ forloop.counter }}" disabled>
+                            <label for="preview_{{ field.id }}_{{ forloop.counter }}">{{ option }}</label>
+                        </div>
+                    {% empty %}
+                        <div style="color: #6c757d; font-style: italic;">No options defined</div>
+                    {% endfor %}
+                </div>
+            {% elif field.field_type == 'checkbox' %}
+                <div class="field-options">
+                    {% for option in field.options %}
+                        <div class="field-option">
+                            <input type="checkbox" name="preview_{{ field.id }}" id="preview_{{ field.id }}_{{ forloop.counter }}" disabled>
+                            <label for="preview_{{ field.id }}_{{ forloop.counter }}">{{ option }}</label>
+                        </div>
+                    {% empty %}
+                        <div style="color: #6c757d; font-style: italic;">No options defined</div>
+                    {% endfor %}
+                </div>
+            {% elif field.field_type == 'select' %}
+                <select class="field-input" disabled>
+                    <option value="">{{ field.placeholder|default:'Select an option...' }}</option>
+                    {% for option in field.options %}
+                        <option value="{{ option }}">{{ option }}</option>
+                    {% endfor %}
+                </select>
+            {% elif field.field_type == 'file' %}
+                <input type="file" class="field-input" disabled>
+            {% endif %}
+        </div>
+        {% endfor %}
+        
+        <div class="total-price">
+            Total Estimated Price: ₹{{ original.base_price|floatformat:0 }}
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %} 
