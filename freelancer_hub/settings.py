@@ -96,10 +96,17 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
 }
 
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
+CORS_ALLOWED_ORIGINS = [
+    'https://talintzbackend-production.up.railway.app',
+]
+CORS_ALLOW_CREDENTIALS = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
 
-CORS_ALLOW_ALL_ORIGINS = os.getenv('CORS_ALLOW_ALL_ORIGINS', 'False').lower() == 'true'
-
+CSRF_TRUSTED_ORIGINS = [
+    'https://talintzbackend-production.up.railway.app',
+    'https://*.railway.app'
+]
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
