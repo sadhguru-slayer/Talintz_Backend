@@ -160,10 +160,14 @@ CHANNEL_LAYERS = {
 
 DATABASES = {
     'default': dj_database_url.config(
-        default='sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite3'),  # Fallback to SQLite if DATABASE_URL is missing
-        conn_max_age=600,  # Optional: Improves performance
+        default='sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite3'),  # Fallback for local dev
+        conn_max_age=600,
     )
 }
+
+# Override for Railway (optional but explicit)
+if os.getenv('RAILWAY_ENVIRONMENT') == 'production':
+    DATABASES['default'] = dj_database_url.config(conn_max_age=600)
 
 # CACHES = {
 #     "default": {
