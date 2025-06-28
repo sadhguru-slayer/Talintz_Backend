@@ -240,13 +240,14 @@ SECURE_SSL_REDIRECT = False    # Disable SSL redirect for development
 SESSION_COOKIE_SECURE = False  # Disable secure cookies for development
 CSRF_COOKIE_SECURE = False     # Disable secure CSRF cookies for development
 
+# Hardcoded private PostgreSQL URL (recommended for Railway)
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'HOST': 'shortline.proxy.rlwy.net',  # Hardcode public proxy
-        'PORT': '18928',                     # Hardcode public port
-        'NAME': os.getenv('PGDATABASE'),     # Keep other vars dynamic
-        'USER': os.getenv('PGUSER'),
-        'PASSWORD': os.getenv('PGPASSWORD'),
+        'HOST': 'postgres.railway.internal',  # Private host
+        'PORT': '5432',                       # Default PostgreSQL port
+        'NAME': os.getenv('PGDATABASE'),      # Database name (from env)
+        'USER': os.getenv('PGUSER'),          # Username (from env)
+        'PASSWORD': os.getenv('PGPASSWORD'),  # Password (from env)
     }
 }
