@@ -288,7 +288,7 @@ class RegisterView(APIView):
         print("Password:", bool(data.get('password')))
         print("Confirm Password:", bool(data.get('confirm_password')))
         print("Referral Code:", data.get('referral_code', 'None'))
-
+        
         # Validate required fields
         required_fields = ['email', 'password', 'confirm_password', 'role']
         missing_fields = [field for field in required_fields if field not in data]
@@ -354,21 +354,21 @@ class RegisterView(APIView):
             print("Password is valid.")
 
             # Handle referral code
-            referrer = None
-            referral_created = False
+        referrer = None
+        referral_created = False
+        
+        if referral_code:
+            referrer = self.validate_referral_code(referral_code)
+            if not referrer:
+                return Response({
+                    "error": "Invalid referral code. Please check and try again."
+                }, status=status.HTTP_400_BAD_REQUEST)
             
-            if referral_code:
-                referrer = self.validate_referral_code(referral_code)
-                if not referrer:
-                    return Response({
-                        "error": "Invalid referral code. Please check and try again."
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                
-                # Prevent self-referral
-                if referrer.email == data['email']:
-                    return Response({
-                        "error": "You cannot refer yourself."
-                    }, status=status.HTTP_400_BAD_REQUEST)
+            # Prevent self-referral
+            if referrer.email == data['email']:
+                return Response({
+                    "error": "You cannot refer yourself."
+                }, status=status.HTTP_400_BAD_REQUEST)
             
             # Generate unique username and nickname
             username = self.generate_unique_username(data['email'])
