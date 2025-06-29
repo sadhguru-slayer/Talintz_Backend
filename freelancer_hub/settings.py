@@ -242,8 +242,6 @@ EMAIL_HOST_USER = 'ims.guru29@gmail.com'
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASSWORD')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 SERVER_EMAIL = EMAIL_HOST_USER
-import os
-print(os.getenv('EMAIL_PASSWORD'))  # This should print your 16-character password without spaces
 
 # Critical security settings (add to production.py)
 SECURE_HSTS_SECONDS = 2592000  # 30 days in seconds
