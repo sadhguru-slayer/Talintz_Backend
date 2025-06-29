@@ -251,7 +251,7 @@ class OBSPEligibilityEvaluator:
                 self.evaluation_result['reasons'].append(
                     f"✅ Bonus skills: {', '.join(optional_matches)} (+{optional_bonus} points)"
                 )
-
+            
             score = total_skill_match
             if skill_requirements_met and core_requirements_met:
                 score = min(100, total_skill_match + optional_bonus)
