@@ -216,54 +216,37 @@ def obsp_detail_with_eligibility(request, obsp_id):
             for level in template_levels:
                 level_data = freelancer_eligibility.get_level_eligibility(level)
                 
-                # Check if there's valid proof data
-                proof_data = level_data.get('proof', {})
-                if isinstance(proof_data, dict) and 'error' in proof_data:
-                    # If there's an error in proof, provide default data
-                    detailed_analysis[level] = {
-                        'is_eligible': False,
-                        'is_applied': level in applied_levels,
-                        'score': 0,
-                        'proof': {
-                            'level': level,
-                            'proof': {
-                                'rating': {'min_required': 4.0, 'average_rating': 0},
-                                'skill_match': {'min_required': 60.0, 'required_match_percentage': 0},
-                                'project_experience': {'required_projects': 1, 'completed_projects_count': 0},
-                                'deadline_compliance': {'min_required': 90.0, 'compliance_rate': 0}
-                            },
-                            'reasons': [f"Level {level} criteria not configured yet"]
-                        },
-                        'reasons': [f"Level {level} criteria not configured yet"]
-                    }
-                else:
-                    # Use the valid data
-                    detailed_analysis[level] = {
-                        'is_eligible': level_data.get('is_eligible', False),
-                        'is_applied': level in applied_levels,
-                        'score': level_data.get('score', 0),
-                        'proof': proof_data,
-                        'reasons': proof_data.get('reasons', [])
-                    }
+                # Get the actual eligibility data
+                level_eligibility = OBSPEligibilityManager.get_eligibility(freelancer, obsp_template, level)
+                
+                # Use the exact reasons from the eligibility data
+                reasons = level_eligibility.get('proof', {}).get('reasons', [])
+                if not reasons and 'error' in level_eligibility.get('proof', {}):
+                    reasons = [f"❌ Level {level} criteria not configured"]
+                
+                detailed_analysis[level] = {
+                    'is_eligible': level_eligibility.get('is_eligible', False),
+                    'is_applied': level in applied_levels,
+                    'score': level_eligibility.get('score', 0),
+                    'proof': level_eligibility.get('proof', {}),
+                    'reasons': reasons
+                }
                     
         except FreelancerOBSPEligibility.DoesNotExist:
-            # Create default analysis for each level
+            # Calculate new eligibility for each level
             for level in template_levels:
+                level_eligibility = OBSPEligibilityManager.get_eligibility(freelancer, obsp_template, level)
+                
+                reasons = level_eligibility.get('proof', {}).get('reasons', [])
+                if not reasons:
+                    reasons = ["❌ Initial eligibility calculation needed"]
+                
                 detailed_analysis[level] = {
-                    'is_eligible': False,
+                    'is_eligible': level_eligibility.get('is_eligible', False),
                     'is_applied': level in applied_levels,
-                    'score': 0,
-                    'proof': {
-                        'level': level,
-                        'proof': {
-                            'rating': {'min_required': 4.0, 'average_rating': 0},
-                            'skill_match': {'min_required': 60.0, 'required_match_percentage': 0},
-                            'project_experience': {'required_projects': 1, 'completed_projects_count': 0},
-                            'deadline_compliance': {'min_required': 90.0, 'compliance_rate': 0}
-                        },
-                        'reasons': ["Initial eligibility calculation needed"]
-                    },
-                    'reasons': ["Initial eligibility calculation needed"]
+                    'score': level_eligibility.get('score', 0),
+                    'proof': level_eligibility.get('proof', {}),
+                    'reasons': reasons
                 }
         
         # Build response
