@@ -223,17 +223,39 @@ class OBSPEligibilityEvaluator:
             
             total_skill_match = required_match_percentage
             
-            if total_skill_match >= min_skill_match_percentage and core_match_percentage >= 80:
-                score = min(100, total_skill_match + optional_bonus)
+            # Separate checks for better feedback
+            skill_requirements_met = total_skill_match >= min_skill_match_percentage
+            core_requirements_met = core_match_percentage >= 80
+
+            if skill_requirements_met:
                 self.evaluation_result['reasons'].append(
-                    f"✅ Meets skill requirements: {total_skill_match:.1f}% match"
+                    f"✅ Required skills match: {total_skill_match:.1f}% (minimum: {min_skill_match_percentage}%)"
                 )
             else:
-                score = total_skill_match
+                missing_required = set(required_skills) - freelancer_skills
                 self.evaluation_result['reasons'].append(
-                    f"❌ Insufficient skill match: {total_skill_match:.1f}% (required: {min_skill_match_percentage}%)"
+                    f"❌ Missing required skills: {', '.join(missing_required)}"
                 )
-            
+
+            if core_requirements_met:
+                self.evaluation_result['reasons'].append(
+                    f"✅ Core skills match: {core_match_percentage:.1f}%"
+                )
+            else:
+                missing_core = set(core_skills) - freelancer_skills
+                self.evaluation_result['reasons'].append(
+                    f"❌ Missing core skills: {', '.join(missing_core)}"
+                )
+
+            if optional_matches:
+                self.evaluation_result['reasons'].append(
+                    f"✅ Bonus skills: {', '.join(optional_matches)} (+{optional_bonus} points)"
+                )
+
+            score = total_skill_match
+            if skill_requirements_met and core_requirements_met:
+                score = min(100, total_skill_match + optional_bonus)
+
             self.evaluation_result['proof']['skill_match'] = {
                 'required_skills': required_skills,
                 'core_skills': core_skills,

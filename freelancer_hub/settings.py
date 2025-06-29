@@ -232,7 +232,18 @@ ADMIN_INDEX_TITLE = "Welcome to Talintz Administration"
 RAZORPAY_KEY_ID = os.getenv('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.getenv('RAZORPAY_KEY_SECRET')
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# Email Configuration for Zoho
+# Email Configuration for Gmail
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'ims.guru29@gmail.com'
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASSWORD')
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+SERVER_EMAIL = EMAIL_HOST_USER
+import os
+print(os.getenv('EMAIL_PASSWORD'))  # This should print your 16-character password without spaces
 
 # Critical security settings (add to production.py)
 SECURE_HSTS_SECONDS = 2592000  # 30 days in seconds
@@ -241,13 +252,23 @@ SESSION_COOKIE_SECURE = False  # Disable secure cookies for development
 CSRF_COOKIE_SECURE = False     # Disable secure CSRF cookies for development
 
 # Hardcoded private PostgreSQL URL (recommended for Railway)
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'HOST': 'shortline.proxy.rlwy.net',  # Private host
-        'PORT': '18928',                       # Default PostgreSQL port
-        'NAME': os.getenv('PGDATABASE'),      # Database name (from env)
-        'USER': os.getenv('PGUSER'),          # Username (from env)
-        'PASSWORD': os.getenv('PGPASSWORD'),  # Password (from env)
+if DEBUG:
+    # Local development database settings
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    # Production database settings
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'HOST': 'shortline.proxy.rlwy.net',  # Private host
+            'PORT': '18928',                     # Default PostgreSQL port
+            'NAME': os.getenv('PGDATABASE'),     # Database name (from env)
+            'USER': os.getenv('PGUSER'),         # Username (from env)
+            'PASSWORD': os.getenv('PGPASSWORD'), # Password (from env)
+        }
+    }

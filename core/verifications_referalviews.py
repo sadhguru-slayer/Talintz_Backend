@@ -23,19 +23,43 @@ class SendEmailVerificationCode(APIView):
         cache.set(f"email_verif_{user.id}", code, timeout=10*60)  # 10 minutes
         
         try:
+            # Create a more professional email message
+            subject = "Talintz Email Verification"
+            message = f"""
+            Hello {user.get_full_name() or user.username},
+            
+            Your verification code is: {code}
+            
+            Please enter this code in the verification page to confirm your email address.
+            
+            This code will expire in 10 minutes.
+            
+            If you didn't request this, please ignore this email.
+            
+            Best regards,
+            The Talintz Team
+            """
+            
+            # Send the email
             send_mail(
-                "Your Email Verification Code",
-                f"Your verification code is: {code}",
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,  # This will raise an exception if email fails
+                subject=subject,
+                message=message.strip(),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
             )
-            return Response({"detail": "Verification code sent."}, status=status.HTTP_200_OK)
+            return Response({"detail": "Verification code sent to your email."}, status=status.HTTP_200_OK)
+            
         except Exception as e:
-            # If email fails, still return success but log the error
-            print(f"Email sending failed: {e}")
-            print(f"Verification code for {user.email}: {code}")
-            return Response({"detail": "Verification code sent."}, status=status.HTTP_200_OK)
+            # Log the error properly
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send verification email to {user.email}: {str(e)}")
+            
+            return Response(
+                {"detail": "Failed to send verification email. Please try again later."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class VerifyEmailCode(APIView):
     permission_classes = [permissions.IsAuthenticated]
