@@ -24,7 +24,7 @@ drf-yasg==1.21.9
 
 # Production
 gunicorn==20.1.0
-whitenoise==6.4.0
+whitenoise==6.5.0
 
 # Security
 argon2-cffi==23.1.0
