@@ -45,6 +45,7 @@ from decimal import Decimal
 from django.core.validators import MinValueValidator, MaxValueValidator
 from financeapp.models.hold import Hold
 from financeapp.models import Wallet
+from freelancer.obsp_eligibility import OBSPEligibilityCalculator
 
 # Create your views here.
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -274,20 +275,8 @@ class RegisterView(APIView):
             return None
 
     def post(self, request):
-        # Debug: Log incoming request data
-        print("\n=== DEBUG: REGISTER REQUEST DATA ===")
-        print("Raw request data:", request.data)
-        print("Headers:", request.headers)
         
         data = request.data.copy()  # Create mutable copy
-        
-        # Debug: Log processed data
-        print("\n=== DEBUG: PROCESSED DATA ===")
-        print("Email:", data.get('email'))
-        print("Role:", data.get('role'))
-        print("Password:", bool(data.get('password')))
-        print("Confirm Password:", bool(data.get('confirm_password')))
-        print("Referral Code:", data.get('referral_code', 'None'))
         
         # Validate required fields
         required_fields = ['email', 'password', 'confirm_password', 'role']
@@ -303,11 +292,7 @@ class RegisterView(APIView):
         # Validate email format
         try:
             validate_email(data['email'])
-            print("\n=== DEBUG: EMAIL VALIDATION ===")
-            print("Email is valid.")
         except ValidationError:
-            print("\n=== DEBUG: EMAIL VALIDATION ===")
-            print("Email is invalid.")
             return Response(
                 {"error": "Invalid email format"},
                 status=status.HTTP_400_BAD_REQUEST
@@ -315,8 +300,7 @@ class RegisterView(APIView):
 
         # Check if email exists
         if User.objects.filter(email=data['email']).exists():
-            print("\n=== DEBUG: EMAIL EXISTS ===")
-            print("Email already registered.")
+            
             return Response({
                 "error": "This email is already registered. Please use a different email or login.",
                 "action": "login"
@@ -325,7 +309,7 @@ class RegisterView(APIView):
         # Validate role
         valid_roles = ['client', 'freelancer', 'student']
         if data['role'].lower() not in valid_roles:
-            print("\n=== DEBUG: INVALID ROLE ===")
+            # print("\n=== DEBUG: INVALID ROLE ===")
             print("Invalid role:", data['role'])
             return Response(
                 {"error": f"Invalid role selected. Valid roles: {', '.join(valid_roles)}"},
@@ -334,8 +318,6 @@ class RegisterView(APIView):
 
         # Validate passwords match
         if data['password'] != data['confirm_password']:
-            print("\n=== DEBUG: PASSWORD MISMATCH ===")
-            print("Password and confirm_password do not match.")
             return Response(
                 {"error": "Password and Confirm Password must match."},
                 status=status.HTTP_400_BAD_REQUEST
@@ -343,20 +325,24 @@ class RegisterView(APIView):
 
         # Debug: Log referral code handling
         referral_code = data.get('referral_code', '').strip()
-        if referral_code:
-            print("\n=== DEBUG: REFERRAL CODE ===")
-            print("Referral code provided:", referral_code)
         
         try:
             # Debug: Log password validation
-            print("\n=== DEBUG: PASSWORD VALIDATION ===")
             validate_password(data['password'])
-            print("Password is valid.")
 
-            # Handle referral code
+            # Generate unique username and nickname
+            username = self.generate_unique_username(data['email'])
+            nickname = self.generate_nickname(data['email'])
+            
+            # Set role and TalentRise status
+            role = data.get('role', 'student').lower()
+            is_talentrise = data.get('is_talentrise', False)
+            
+            # Initialize referral variables
             referrer = None
             referral_created = False
-
+            
+            # Handle referral code
             if referral_code:
                 referrer = self.validate_referral_code(referral_code)
                 if not referrer:
@@ -369,14 +355,6 @@ class RegisterView(APIView):
                     return Response({
                         "error": "You cannot refer yourself."
                     }, status=status.HTTP_400_BAD_REQUEST)
-                
-            # Generate unique username and nickname
-            username = self.generate_unique_username(data['email'])
-            nickname = self.generate_nickname(data['email'])
-            
-            # Set role and TalentRise status
-            role = data.get('role', 'student').lower()
-            is_talentrise = data.get('is_talentrise', False)
 
             with transaction.atomic():
                 # Create user
@@ -434,6 +412,12 @@ class RegisterView(APIView):
                         "referred_by": referrer.username,
                         "referral_code_used": referral_code
                     }
+
+                # Calculate eligibility for freelancers
+                if role == 'freelancer':
+                    calculator = OBSPEligibilityCalculator(user)
+                    eligibility = calculator.calculate_eligibility()
+                    FreelancerProfile.objects.filter(user=user).update(obsp_eligibility=eligibility)
 
                 return Response(response_data, status=status.HTTP_201_CREATED)
 
