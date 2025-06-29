@@ -244,8 +244,8 @@ CSRF_COOKIE_SECURE = False     # Disable secure CSRF cookies for development
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'HOST': 'postgres.railway.internal',  # Private host
-        'PORT': '5432',                       # Default PostgreSQL port
+        'HOST': 'shortline.proxy.rlwy.net',  # Private host
+        'PORT': '18928',                       # Default PostgreSQL port
         'NAME': os.getenv('PGDATABASE'),      # Database name (from env)
         'USER': os.getenv('PGUSER'),          # Username (from env)
         'PASSWORD': os.getenv('PGPASSWORD'),  # Password (from env)
