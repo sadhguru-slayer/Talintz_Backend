@@ -5,6 +5,7 @@ from rest_framework import status
 from OBSP.models import OBSPTemplate, OBSPResponse, OBSPApplication
 from freelancer.models import FreelancerOBSPEligibility, OBSPEligibilityManager
 from django.db.models import Prefetch
+from django.db.models import Min, Max
 import json
 import traceback
 
@@ -181,7 +182,7 @@ def obsp_list_with_eligibility(request):
 @permission_classes([IsAuthenticated])
 def obsp_detail_with_eligibility(request, obsp_id):
     """
-    Get detailed OBSP information with full eligibility analysis
+    Get detailed OBSP information with full eligibility analysis and budget range.
     """
     try:
         freelancer = request.user
@@ -189,18 +190,22 @@ def obsp_detail_with_eligibility(request, obsp_id):
         # Get OBSP template
         obsp_template = OBSPTemplate.objects.get(id=obsp_id, is_active=True)
         template_levels = obsp_template.levels.values_list('level', flat=True).distinct()
-        # Get or calculate eligibility
-        eligibility = OBSPEligibilityManager.get_eligibility(freelancer, obsp_template, 'easy')
+        
+        # Calculate budget range (min and max prices from levels)
+        budget_range = {
+            'min': obsp_template.levels.aggregate(min_price=Min('price'))['min_price'],
+            'max': obsp_template.levels.aggregate(max_price=Max('price'))['max_price']
+        }
         
         # Get detailed analysis for all levels
         detailed_analysis = {}
-        # Get all applications for this freelancer and this OBSP
         applied_levels = set(
             OBSPApplication.objects.filter(
                 freelancer=freelancer,
                 obsp_template=obsp_template
             ).values_list('selected_level', flat=True)
         )
+        
         for level in template_levels:
             level_eligibility = OBSPEligibilityManager.get_eligibility(freelancer, obsp_template, level)
             
@@ -220,7 +225,8 @@ def obsp_detail_with_eligibility(request, obsp_id):
                 'category': obsp_template.category.name,
                 'industry': obsp_template.get_industry_display(),
                 'description': obsp_template.description,
-                'is_active': obsp_template.is_active
+                'is_active': obsp_template.is_active,
+                'budget_range': budget_range  # Add budget range here
             },
             'eligibility_analysis': detailed_analysis,
             'recommendations': _generate_recommendations(detailed_analysis)
