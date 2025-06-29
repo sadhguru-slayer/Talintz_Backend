@@ -131,7 +131,9 @@ CSRF_COOKIE_SECURE = True
 
 CSRF_TRUSTED_ORIGINS = [
     'https://talintzbackend-production.up.railway.app',
-    'https://*.railway.app'
+    'https://*.railway.app',
+    'https://talintz.com',
+    'https://*.talintz.com'  # This will cover all subdomains
 ]
 
 MIDDLEWARE = [
