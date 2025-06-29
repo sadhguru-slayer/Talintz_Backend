@@ -188,7 +188,7 @@ def obsp_detail_with_eligibility(request, obsp_id):
         
         # Get OBSP template
         obsp_template = OBSPTemplate.objects.get(id=obsp_id, is_active=True)
-        
+        template_levels = obsp_template.levels.values_list('level', flat=True).distinct()
         # Get or calculate eligibility
         eligibility = OBSPEligibilityManager.get_eligibility(freelancer, obsp_template, 'easy')
         
@@ -201,7 +201,7 @@ def obsp_detail_with_eligibility(request, obsp_id):
                 obsp_template=obsp_template
             ).values_list('selected_level', flat=True)
         )
-        for level in ['easy', 'medium', 'hard']:
+        for level in template_levels:
             level_eligibility = OBSPEligibilityManager.get_eligibility(freelancer, obsp_template, level)
             
             detailed_analysis[level] = {
@@ -241,6 +241,7 @@ def obsp_detail_with_eligibility(request, obsp_id):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 def _generate_recommendations(analysis):
     """Generate improvement recommendations based on eligibility analysis"""
