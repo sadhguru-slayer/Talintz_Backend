@@ -191,7 +191,7 @@ def obsp_detail_with_eligibility(request, obsp_id):
         obsp_template = OBSPTemplate.objects.get(id=obsp_id, is_active=True)
         template_levels = obsp_template.levels.values_list('level', flat=True).distinct()
         
-        # Calculate budget range (min and max prices from levels)
+        # Calculate budget range
         budget_range = {
             'min': obsp_template.levels.aggregate(min_price=Min('price'))['min_price'],
             'max': obsp_template.levels.aggregate(max_price=Max('price'))['max_price']
@@ -205,17 +205,39 @@ def obsp_detail_with_eligibility(request, obsp_id):
                 obsp_template=obsp_template
             ).values_list('selected_level', flat=True)
         )
+
+        # Get existing eligibility data
+        try:
+            freelancer_eligibility = FreelancerOBSPEligibility.objects.get(
+                freelancer=freelancer,
+                obsp_template=obsp_template
+            )
+        except FreelancerOBSPEligibility.DoesNotExist:
+            freelancer_eligibility = None
         
         for level in template_levels:
-            level_eligibility = OBSPEligibilityManager.get_eligibility(freelancer, obsp_template, level)
-            
-            detailed_analysis[level] = {
-                'is_eligible': level_eligibility['is_eligible'],
-                'is_applied': level in applied_levels,
-                'score': level_eligibility['score'],
-                'proof': level_eligibility.get('proof', {}),
-                'reasons': level_eligibility.get('proof.reasons', [])
-            }
+            # Get eligibility data from stored calculations if available
+            if freelancer_eligibility:
+                level_data = freelancer_eligibility.get_level_eligibility(level)
+                
+                detailed_analysis[level] = {
+                    'is_eligible': level_data.get('is_eligible', False),
+                    'is_applied': level in applied_levels,
+                    'score': level_data.get('score', 0),
+                    'proof': level_data.get('proof', {}),
+                    'reasons': level_data.get('proof', {}).get('reasons', [])
+                }
+            else:
+                # If no stored eligibility, calculate new
+                level_eligibility = OBSPEligibilityManager.get_eligibility(freelancer, obsp_template, level)
+                
+                detailed_analysis[level] = {
+                    'is_eligible': level_eligibility['is_eligible'],
+                    'is_applied': level in applied_levels,
+                    'score': level_eligibility['score'],
+                    'proof': level_eligibility.get('proof', {}),
+                    'reasons': level_eligibility.get('proof.reasons', [])
+                }
         
         # Build response
         response_data = {
@@ -226,7 +248,7 @@ def obsp_detail_with_eligibility(request, obsp_id):
                 'industry': obsp_template.get_industry_display(),
                 'description': obsp_template.description,
                 'is_active': obsp_template.is_active,
-                'budget_range': budget_range  # Add budget range here
+                'budget_range': budget_range
             },
             'eligibility_analysis': detailed_analysis,
             'recommendations': _generate_recommendations(detailed_analysis)
