@@ -194,7 +194,8 @@ from .models import Conversation, ConversationParticipant  # adjust import as ne
 def start_conversation(request):
     sender_id = request.data.get('sender_id')
     recipient_id = request.data.get('recipient_id')
-    
+    if not sender_id:
+        sender_id = request.user.id
     print("Incoming request data:", request.data)
     print("Sender ID:", sender_id)
     print("Recipient ID:", recipient_id)
