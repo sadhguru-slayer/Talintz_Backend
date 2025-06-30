@@ -24,10 +24,10 @@ class UserAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         # Handle password for new user creation (password1 and password2)
-        if not change and 'password1' in form.cleaned_data:
+        if not change and 'password1' in form.cleaned_data and form.cleaned_data['password1']:
             obj.password = make_password(form.cleaned_data['password1'])
-        # Handle password for existing user update
-        elif change and 'password' in form.changed_data:
+        # Handle password for existing user update (raw password field)
+        elif change and 'password' in form.cleaned_data and form.cleaned_data['password'] and not form.cleaned_data['password'].startswith('pbkdf2_sha256$'):
             obj.password = make_password(form.cleaned_data['password'])
         super().save_model(request, obj, form, change)
 
