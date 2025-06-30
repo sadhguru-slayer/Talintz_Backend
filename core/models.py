@@ -502,7 +502,7 @@ class Task(models.Model):
         ).exists()
         
         self.can_start = not has_blocking
-        self.save()
+        self.save()a
     
     def get_blocking_tasks(self):
         """Get tasks that are blocking this one from starting"""

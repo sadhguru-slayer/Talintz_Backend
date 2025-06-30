@@ -23,9 +23,12 @@ class UserAdmin(admin.ModelAdmin):
     ordering = ('username',)
 
     def save_model(self, request, obj, form, change):
-        # Hash the password if it's being set or changed
-        if 'password' in form.changed_data:
-            obj.password = make_password(obj.password)
+        # Handle password for new user creation (password1 and password2)
+        if not change and 'password1' in form.cleaned_data:
+            obj.password = make_password(form.cleaned_data['password1'])
+        # Handle password for existing user update
+        elif change and 'password' in form.changed_data:
+            obj.password = make_password(form.cleaned_data['password'])
         super().save_model(request, obj, form, change)
 
 admin.site.register(User, UserAdmin)
