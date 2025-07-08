@@ -246,7 +246,71 @@ class SpecifiedActivityListView(generics.ListAPIView):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
-    
+
+
+
+from workspace.models import Workspace, WorkspaceParticipant
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+class ClientWorkspaces(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        workspaces = Workspace.objects.filter(participants__user=user).distinct().order_by('-created_at')
+        data = []
+        for ws in workspaces:
+            content_object = ws.content_object
+            # Default values
+            title = None
+            workspace_type = None
+            status = None
+            budget = None
+            deadline = None
+
+            # Project workspace
+            if hasattr(content_object, 'milestones'):
+                title = getattr(content_object, "title", None)
+                workspace_type = "project"
+                status = getattr(content_object, "status", None)
+                budget = getattr(content_object, "budget", None)
+                deadline = getattr(content_object, "deadline", None)
+            # OBSP workspace
+            elif hasattr(content_object, 'template'):
+                # Use OBSPLevel name as title
+                try:
+                    obsp_level = content_object.template.levels.get(level=content_object.selected_level)
+                    title = obsp_level.name
+                except Exception:
+                    title = getattr(content_object.template, "title", None)
+                workspace_type = "obsp"
+                status = getattr(content_object, "status", None)
+                budget = getattr(content_object, "total_price", None)
+                # Try to get deadline from assignment
+                assignment = content_object.get_active_assignment() if hasattr(content_object, "get_active_assignment") else None
+                if assignment and hasattr(assignment, "assigned_at"):
+                    # You can calculate deadline based on OBSPLevel duration if needed
+                    deadline = assignment.assigned_at
+                else:
+                    deadline = None
+
+            data.append({
+                "id": ws.id,
+                "content_type": ws.content_type.model,
+                "object_id": ws.object_id,
+                "created_at": ws.created_at,
+                "updated_at": ws.updated_at,
+                "is_active": ws.is_active,
+                "title": title,
+                "type": workspace_type,
+                "status": status,
+                "budget": float(budget) if budget is not None else None,
+                "deadline": deadline.isoformat() if deadline else None,
+                # Add more fields as needed
+            })
+        return Response(data, status=200)
 
 class PostedProjects(APIView):
     permission_classes = [IsAuthenticated]

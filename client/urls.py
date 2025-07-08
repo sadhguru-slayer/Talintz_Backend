@@ -1,7 +1,7 @@
 # client/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .DashBoardViews import EventViewSet,RecentActivityView,PostedProjects,DashBoard_Overview,ActivityListView,SpecifiedActivityListView,SpendingDistributionByProject,CollaborationView,ProjectDetailsAPIView,BidsAPIView, InvitationViewSet
+from .DashBoardViews import ClientWorkspaces,EventViewSet,RecentActivityView,PostedProjects,DashBoard_Overview,ActivityListView,SpecifiedActivityListView,SpendingDistributionByProject,CollaborationView,ProjectDetailsAPIView,BidsAPIView, InvitationViewSet
 from core.views import *
 from .DashBoardViews import SpendingDataView
 from .profileViews import delete_document,UnAuthClientViews,ClientViews,update_profile,ClientReviewsandRatings,post_reply, update_terms_acceptance, FreelancerProfileDataView
@@ -38,6 +38,8 @@ urlpatterns = [
     path('specified_recent_activity/', SpecifiedActivityListView.as_view(), name='specified_recent_activity'),
     path('other_recent_activity/', ActivityListView.as_view(), name='other_recent_activity'),
     path('posted_projects/', PostedProjects.as_view(), name='posted_projects'),
+    path('workspaces/', ClientWorkspaces.as_view(), name='client_workspaces'),
+
     path('dashboard_overview/', DashBoard_Overview.as_view(), name='dashboard_overview'),
     path('spending_data/', SpendingDataView.as_view(), name='spending_data'),
     path('spending_distribution_by_project/', SpendingDistributionByProject.as_view(), name='spending_distribution_by_project'),

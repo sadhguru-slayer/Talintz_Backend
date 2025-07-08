@@ -25,6 +25,8 @@ from .models import FreelancerActivity
 from freelancer.obsp_eligibility import OBSPEligibilityEvaluator
 from freelancer.models import FreelancerOBSPEligibility
 from OBSP.models import OBSPTemplate, OBSPCriteria
+from workspace.models import Workspace, WorkspaceParticipant
+from django.contrib.contenttypes.models import ContentType
 User = get_user_model()
 
 # Create your views here.
@@ -1801,7 +1803,40 @@ class InvitationResponseViewSet(viewsets.ViewSet):
                 # Get the bid and project
                 bid = invitation.bid
                 project = bid.project
-                
+                client = project.client
+                freelancer = request.user
+
+                # Workspace logic
+                content_type = ContentType.objects.get_for_model(project)
+                workspace = Workspace.objects.filter(
+                    content_type=content_type,
+                    object_id=project.id
+                ).first()
+
+                if not workspace:
+                    workspace = Workspace.objects.create(
+                        content_type=content_type,
+                        object_id=project.id
+                    )
+                    WorkspaceParticipant.objects.create(
+                        workspace=workspace,
+                        user=client,
+                        role='client'
+                    )
+                    WorkspaceParticipant.objects.create(
+                        workspace=workspace,
+                        user=freelancer,
+                        role='freelancer'
+                    )
+                else:
+                    # If workspace exists, ensure freelancer is a participant
+                    if not workspace.participants.filter(user=freelancer).exists():
+                        WorkspaceParticipant.objects.create(
+                            workspace=workspace,
+                            user=freelancer,
+                            role='freelancer'
+                        )
+
                 return Response({
                     'status': 'success',
                     'message': f'Project assignment accepted! You are now assigned to "{project.title}"',
