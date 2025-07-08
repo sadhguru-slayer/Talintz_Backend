@@ -3,14 +3,16 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django import forms
-from .models import OBSPAssignment,OBSPTemplate, OBSPLevel, OBSPField, OBSPResponse,OBSPCriteria, OBSPMilestone, OBSPApplication
+from .models import OBSPAssignmentNote,OBSPAssignment,OBSPTemplate, OBSPLevel, OBSPField, OBSPResponse,OBSPCriteria, OBSPMilestone, OBSPApplication
 import re
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+import json
 
 User = get_user_model()
 
 admin.site.register(OBSPCriteria)
+admin.site.register(OBSPAssignmentNote)
 
 class OBSPLevelForm(forms.ModelForm):
     """Custom form for OBSP levels with better feature/deliverable handling"""
@@ -334,6 +336,7 @@ class OBSPTemplateAdmin(admin.ModelAdmin):
         ('Pricing', {
             'fields': ('base_price', 'currency')
         }),
+        
         ('Status', {
             'fields': ('is_active', 'created_by')
         }),
@@ -463,6 +466,9 @@ class OBSPLevelAdmin(admin.ModelAdmin):
         ('Level Information', {
             'fields': ('template', 'level', 'name', 'order')
         }),
+        ('Limits', {
+            'fields': ('max_revisions',)
+        }),
         ('Pricing & Timeline', {
             'fields': ('price', 'duration')
         }),
@@ -541,7 +547,7 @@ class OBSPFieldAdmin(admin.ModelAdmin):
 @admin.register(OBSPMilestone)
 class OBSPMilestoneAdmin(admin.ModelAdmin):
     form = OBSPMilestoneForm
-    list_display = ('template', 'level', 'milestone_type', 'title', 'estimated_days', 'payout_percentage', 'status', 'order', 'get_deliverables_count', 'get_checklist_count')
+    list_display = ('id','template', 'level', 'milestone_type', 'title', 'estimated_days', 'payout_percentage', 'status', 'order', 'get_deliverables_count', 'get_checklist_count')
     list_filter = ('milestone_type', 'status', 'client_approval_required', 'template', 'level')
     search_fields = ('title', 'template__title', 'level__name')
     ordering = ('template', 'level', 'order')
@@ -584,19 +590,68 @@ class OBSPMilestoneAdmin(admin.ModelAdmin):
             kwargs["queryset"] = OBSPLevel.objects.filter(is_active=True)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
+
+class OBSPResponseForm(forms.ModelForm):
+    milestone_progress_text = forms.CharField(
+        label="Milestone Progress (one per line: milestone_id - status)",
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 5, 'style': 'width: 100%;'}),
+        help_text="Format: <code>milestone_id - status</code> (e.g. <code>21 - completed</code>)"
+    )
+
+    class Meta:
+        model = OBSPResponse
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Prepopulate the text field from the JSON
+        progress = self.instance.milestone_progress or {}
+        lines = [f"{k} - {v}" for k, v in progress.items()]
+        self.fields['milestone_progress_text'].initial = "\n".join(lines)
+
+    def clean_milestone_progress_text(self):
+        text = self.cleaned_data.get('milestone_progress_text', '')
+        progress = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if '-' not in line:
+                raise forms.ValidationError("Each line must be in the format: milestone_id - status")
+            milestone_id, status = line.split('-', 1)
+            progress[milestone_id.strip()] = status.strip()
+        return progress
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.milestone_progress = self.cleaned_data.get('milestone_progress_text', {})
+        if commit:
+            instance.save()
+        return instance
+
 @admin.register(OBSPResponse)
 class OBSPResponseAdmin(admin.ModelAdmin):
-    list_display = ('template', 'client', 'selected_level', 'total_price', 'status', 'created_at')
+    form = OBSPResponseForm
+    list_display = (
+        'template', 'client', 'selected_level', 'total_price', 'status', 'created_at', 'current_milestone'
+    )
     list_filter = ('status', 'selected_level', 'created_at', 'template')
     search_fields = ('template__title', 'client__username')
     readonly_fields = ('created_at', 'updated_at', 'responses_display')
     
     fieldsets = (
         ('Response Information', {
-            'fields': ('template', 'client', 'selected_level', 'status')
+            'fields': ('template', 'client', 'selected_level', 'status', 'current_milestone')
         }),
         ('Pricing', {
             'fields': ('total_price',)
+        }),
+        ('Limits', {
+            'fields': ('max_revisions',)
+        }),
+        ('Milestone Tracking', {
+            'fields': ('milestone_progress_text',)
         }),
         ('Response Data', {
             'fields': ('responses_display',),
@@ -607,7 +662,7 @@ class OBSPResponseAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def responses_display(self, obj):
         if obj.responses:
             html = '<div style="background: #f8f9fa; padding: 15px; border-radius: 5px;">'
@@ -617,7 +672,7 @@ class OBSPResponseAdmin(admin.ModelAdmin):
             return mark_safe(html)
         return "No responses"
     responses_display.short_description = "Responses"
-    
+
     def has_add_permission(self, request):
         # Responses should only be created through the frontend
         return False
@@ -628,17 +683,8 @@ admin.site.site_title = "Talintz Admin Portal"
 admin.site.index_title = "Welcome to Talintz Administration"
 
 class OBSPAssignmentForm(forms.ModelForm):
-    """Custom form for OBSP assignments with milestone progress tracking"""
-    
-    milestone_progress_text = forms.CharField(
-        widget=forms.Textarea(attrs={
-            'rows': 8,
-            'placeholder': 'Enter milestone progress in format:\nMilestone Name: 75% | Notes\nAnother Milestone: 100% | Completed\n\nFormat: Milestone Name: Percentage% | Notes'
-        }),
-        required=False,
-        help_text="<strong>Format:</strong> Milestone Name: Percentage% | Notes<br><strong>Example:</strong><br>Design Phase: 75% | Wireframes completed, waiting for client feedback<br>Development: 0% | Not started yet"
-    )
-    
+    """Custom form for OBSP assignments (milestone progress removed)"""
+
     class Meta:
         model = OBSPAssignment
         fields = '__all__'
@@ -648,75 +694,6 @@ class OBSPAssignmentForm(forms.ModelForm):
             'progress_percentage': forms.NumberInput(attrs={'min': 0, 'max': 100, 'style': 'width: 100px;'}),
             'quality_score': forms.NumberInput(attrs={'min': 0, 'max': 5, 'step': 0.1, 'style': 'width: 100px;'}),
         }
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if self.instance and self.instance.pk and self.instance.milestone_progress:
-            # Convert milestone progress back to text format
-            progress_text = []
-            for milestone_name, data in self.instance.milestone_progress.items():
-                if isinstance(data, dict):
-                    percentage = data.get('percentage', 0)
-                    notes = data.get('notes', '')
-                    progress_text.append(f"{milestone_name}: {percentage}% | {notes}")
-                else:
-                    progress_text.append(f"{milestone_name}: {data}%")
-            self.fields['milestone_progress_text'].initial = '\n'.join(progress_text)
-    
-    def clean_milestone_progress_text(self):
-        """Parse milestone progress text into structured data"""
-        progress_text = self.cleaned_data.get('milestone_progress_text', '')
-        if not progress_text.strip():
-            return {}
-        
-        progress_data = {}
-        for line in progress_text.split('\n'):
-            line = line.strip()
-            if line and ':' in line:
-                # Parse format: "Milestone Name: Percentage% | Notes"
-                parts = line.split(':', 1)
-                milestone_name = parts[0].strip()
-                
-                if len(parts) > 1:
-                    value_part = parts[1].strip()
-                    
-                    # Check for percentage and notes
-                    if '|' in value_part:
-                        percentage_part, notes = value_part.split('|', 1)
-                        percentage = percentage_part.strip().replace('%', '')
-                        notes = notes.strip()
-                    else:
-                        percentage = value_part.replace('%', '').strip()
-                        notes = ''
-                    
-                    try:
-                        percentage = int(percentage)
-                        progress_data[milestone_name] = {
-                            'percentage': percentage,
-                            'notes': notes,
-                            'updated_at': timezone.now().isoformat()
-                        }
-                    except ValueError:
-                        # If percentage parsing fails, store as string
-                        progress_data[milestone_name] = {
-                            'percentage': 0,
-                            'notes': value_part,
-                            'updated_at': timezone.now().isoformat()
-                        }
-        
-        return progress_data
-    
-    def save(self, commit=True):
-        instance = super().save(commit=False)
-        
-        # Set milestone progress from text
-        milestone_progress = self.cleaned_data.get('milestone_progress_text', {})
-        if isinstance(milestone_progress, dict):
-            instance.milestone_progress = milestone_progress
-        
-        if commit:
-            instance.save()
-        return instance
 
 @admin.register(OBSPAssignment)
 class OBSPAssignmentAdmin(admin.ModelAdmin):
@@ -726,8 +703,7 @@ class OBSPAssignmentAdmin(admin.ModelAdmin):
         'get_financial_info', 'assigned_at', 'get_estimated_completion'
     )
     list_filter = (
-        'status', 'assigned_at', 'current_milestone__template', 
-        'current_milestone__level', 'deadline_met'
+        'status', 'assigned_at', 'deadline_met'
     )
     search_fields = (
         'obsp_response__template__title', 'assigned_freelancer__username',
@@ -747,7 +723,7 @@ class OBSPAssignmentAdmin(admin.ModelAdmin):
         }),
         ('Timeline & Progress', {
             'fields': (
-                'progress_percentage', 'current_milestone', 'milestone_progress_text',
+                'progress_percentage',
                 'assigned_at', 'started_at', 'completed_at'
             )
         }),
@@ -758,8 +734,7 @@ class OBSPAssignmentAdmin(admin.ModelAdmin):
         }),
         ('Quality & Feedback', {
             'fields': (
-                'quality_score', 'deadline_met', 'client_feedback', 
-                'freelancer_notes', 'internal_notes'
+                'quality_score', 'deadline_met'
             )
         }),
         ('Project Summary', {
@@ -798,8 +773,12 @@ class OBSPAssignmentAdmin(admin.ModelAdmin):
     
     def get_estimated_completion(self, obj):
         """Display estimated completion date"""
-        if obj.current_milestone and obj.progress_percentage < 100:
-            completion_date = obj.get_estimated_completion_date()
+        # Remove reference to obj.current_milestone
+        # If you want to use milestone info, get it from obj.obsp_response.current_milestone
+        current_milestone = getattr(obj.obsp_response, 'current_milestone', None)
+        if current_milestone and obj.progress_percentage < 100:
+            # If you have a method to get estimated completion date, update it to use obsp_response.current_milestone
+            completion_date = obj.get_estimated_completion_date()  # You may need to update this method too!
             if completion_date:
                 return completion_date.strftime('%b %d, %Y')
         return "N/A"
@@ -930,24 +909,6 @@ class OBSPAssignmentAdmin(admin.ModelAdmin):
         if db_field.name == "assigned_freelancer":
             # Filter to show only users with freelancer role
             kwargs["queryset"] = User.objects.filter(role='freelancer', is_active=True)
-        elif db_field.name == "current_milestone":
-            # Filter milestones based on the OBSP response
-            if request.method == 'GET' and 'obsp_response' in request.GET:
-                obsp_response_id = request.GET.get('obsp_response')
-                if obsp_response_id:
-                    try:
-                        obsp_response = OBSPResponse.objects.get(id=obsp_response_id)
-                        # Get the level object based on selected_level string
-                        level_obj = obsp_response.template.levels.filter(
-                            level=obsp_response.selected_level
-                        ).first()
-                        if level_obj:
-                            kwargs["queryset"] = OBSPMilestone.objects.filter(
-                                template=obsp_response.template,
-                                level=level_obj
-                            )
-                    except OBSPResponse.DoesNotExist:
-                        pass
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
     
     def get_queryset(self, request):
@@ -956,8 +917,7 @@ class OBSPAssignmentAdmin(admin.ModelAdmin):
             'obsp_response__template',
             'obsp_response__client',
             'assigned_freelancer',
-            'assigned_by',
-            'current_milestone'
+            'assigned_by'
         )
 
 class OBSPApplicationForm(forms.ModelForm):
@@ -1168,3 +1128,42 @@ class OBSPApplicationAdmin(admin.ModelAdmin):
             'reviewed_by',
             'eligibility_reference'
         )
+
+class OBSPResponseForm(forms.ModelForm):
+    milestone_progress_text = forms.CharField(
+        label="Milestone Progress (one per line: milestone_id - status)",
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 5, 'style': 'width: 100%;'}),
+        help_text="Format: <code>milestone_id - status</code> (e.g. <code>21 - completed</code>)"
+    )
+
+    class Meta:
+        model = OBSPResponse
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Prepopulate the text field from the JSON
+        progress = self.instance.milestone_progress or {}
+        lines = [f"{k} - {v}" for k, v in progress.items()]
+        self.fields['milestone_progress_text'].initial = "\n".join(lines)
+
+    def clean_milestone_progress_text(self):
+        text = self.cleaned_data.get('milestone_progress_text', '')
+        progress = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if '-' not in line:
+                raise forms.ValidationError("Each line must be in the format: milestone_id - status")
+            milestone_id, status = line.split('-', 1)
+            progress[milestone_id.strip()] = status.strip()
+        return progress
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.milestone_progress = self.cleaned_data.get('milestone_progress_text', {})
+        if commit:
+            instance.save()
+        return instance

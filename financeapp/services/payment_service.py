@@ -224,4 +224,66 @@ class PaymentService:
             return {
                 'success': True,
                 'main_transaction': main_tx
-            } 
+            }
+
+    @staticmethod
+    def process_obsp_milestone_payment(obsp_assignment, milestone):
+        """Process payment for specific OBSP milestone completion"""
+        with transaction.atomic():
+            # Calculate payment amount based on milestone percentage
+            total_amount = obsp_assignment.freelancer_payout
+            milestone_amount = (total_amount * milestone.payout_percentage) / 100
+            
+            # Use existing payment service for the transaction
+            result = PaymentService.process_project_payment(
+                client=obsp_assignment.obsp_response.client,
+                freelancer=obsp_assignment.assigned_freelancer,
+                amount=milestone_amount,
+                wallet_payment=True
+            )
+            
+            # Update the transaction with OBSP details
+            main_tx = result['main_transaction']
+            main_tx.payment_type = 'obsp'
+            main_tx.obsp_response = obsp_assignment.obsp_response
+            main_tx.obsp_assignment = obsp_assignment
+            main_tx.obsp_milestone = milestone
+            main_tx.description = f"OBSP Milestone Payment: {milestone.title}"
+            main_tx.metadata.update({
+                'obsp_response_id': str(obsp_assignment.obsp_response.id),
+                'obsp_assignment_id': str(obsp_assignment.id),
+                'milestone_id': str(milestone.id),
+                'milestone_title': milestone.title,
+                'payout_percentage': float(milestone.payout_percentage),
+                'total_project_amount': float(total_amount),
+            })
+            main_tx.save()
+            
+            # Update milestone status
+            milestone.status = 'completed'
+            milestone.save()
+            
+            # Update assignment progress
+            obsp_assignment.progress_percentage += milestone.payout_percentage
+            obsp_assignment.save()
+            
+            return result
+
+    @staticmethod
+    def get_obsp_payment_summary(obsp_response):
+        """Get payment summary for OBSP response"""
+        transactions = Transaction.objects.filter(
+            obsp_response=obsp_response,
+            status='completed'
+        )
+        
+        total_paid = sum(tx.amount for tx in transactions)
+        total_due = obsp_response.total_price
+        
+        return {
+            'total_due': float(total_due),
+            'total_paid': float(total_paid),
+            'remaining': float(total_due - total_paid),
+            'transactions_count': transactions.count(),
+            'last_payment': transactions.first().completed_at if transactions.exists() else None,
+        } 

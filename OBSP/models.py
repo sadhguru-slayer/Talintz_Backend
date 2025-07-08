@@ -52,6 +52,7 @@ class OBSPLevel(models.Model):
     deliverables = models.JSONField(default=list, help_text="List of deliverables for this level")
     is_active = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0, help_text="Display order (1=first, 2=second, etc.)")
+    max_revisions = models.PositiveIntegerField(default=2, help_text="Maximum number of revisions allowed for this level")
     
     class Meta:
         unique_together = ['template', 'level']
@@ -218,6 +219,10 @@ class OBSPResponse(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft',null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    current_milestone = models.ForeignKey("OBSP.OBSPMilestone", on_delete=models.SET_NULL, null=True, blank=True)
+    milestone_progress = models.JSONField(default=dict, help_text="Progress tracking for each milestone")
+    max_revisions = models.PositiveIntegerField(null=True, blank=True, help_text="Override max revisions for this order (default from level)")
+    
     
     class Meta:
         ordering = ['-created_at']
@@ -269,6 +274,28 @@ class OBSPResponse(models.Model):
     def is_fully_assigned(self):
         """Check if all work is assigned"""
         return self.assignments.filter(status__in=['assigned', 'in_progress', 'review', 'completed']).exists()
+    def update_milestone_progress(self, milestone_name, percentage, notes=""):
+        """Update progress for a specific milestone"""
+        if not self.milestone_progress:
+            self.milestone_progress = {}
+        
+        self.milestone_progress[milestone_name] = {
+            'percentage': percentage,
+            'notes': notes,
+            'updated_at': timezone.now().isoformat()
+        }
+        self.save()
+
+    def set_current_milestone(self, milestone):
+        """Set the current milestone for the response"""
+        self.current_milestone = milestone
+        self.save() 
+    def get_max_revisions(self):
+        """Return the max revisions for this response (override or from level)"""
+        if self.max_revisions is not None:
+            return self.max_revisions
+        level_obj = self.template.levels.filter(level=self.selected_level).first()
+        return level_obj.max_revisions if level_obj else 0
 
 class OBSPMilestone(models.Model):
     """Pre-defined milestones for OBSP templates"""
@@ -444,16 +471,8 @@ class OBSPAssignment(models.Model):
     freelancer_payout = models.DecimalField(max_digits=10, decimal_places=2, help_text="Amount to be paid to freelancer")
     platform_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Platform commission")
     
-    # Milestone tracking
-    current_milestone = models.ForeignKey(OBSPMilestone, on_delete=models.SET_NULL, null=True, blank=True)
-    milestone_progress = models.JSONField(default=dict, help_text="Progress tracking for each milestone")
-    
+
     # Communication and feedback
-    client_feedback = models.TextField(blank=True)
-    freelancer_notes = models.TextField(blank=True)
-    internal_notes = models.TextField(blank=True, help_text="Notes for Talintz team")
-    
-    # Quality metrics
     quality_score = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(5)])
     deadline_met = models.BooleanField(null=True, blank=True)
     
@@ -597,6 +616,29 @@ class OBSPAssignment(models.Model):
         
         return None
 
+    def get_client_feedback(self):
+        """Get all client feedback notes"""
+        return self.notes.filter(note_type='client_feedback').order_by('-created_at')
+    
+    def get_freelancer_notes(self):
+        """Get all freelancer notes"""
+        return self.notes.filter(note_type='freelancer_note').order_by('-created_at')
+    
+    def get_internal_notes(self):
+        """Get all internal notes"""
+        return self.notes.filter(note_type='internal_note').order_by('-created_at')
+    
+    
+    def add_note(self, note_type, content, created_by, milestone=None, **kwargs):
+        """Helper method to add a note"""
+        return self.notes.create(
+            note_type=note_type,
+            content=content,
+            created_by=created_by,
+            milestone=milestone,
+            **kwargs
+        )
+
 class OBSPApplication(models.Model):
     """Freelancer application to work on an OBSP template level"""
     APPLICATION_STATUS_CHOICES = [
@@ -722,3 +764,87 @@ class OBSPApplication(models.Model):
     def days_since_applied(self):
         """Get days since application was submitted"""
         return (timezone.now() - self.applied_at).days
+
+class OBSPAssignmentNote(models.Model):
+    """Notes and feedback for OBSP assignments with milestone tracking"""
+    NOTE_TYPE_CHOICES = [
+        ('client_feedback', 'Client Feedback'),
+        ('freelancer_note', 'Freelancer Note'),
+        ('internal_note', 'Internal Note'),
+        ('milestone_feedback', 'Milestone Feedback'),
+        ('quality_review', 'Quality Review'),
+        ('deadline_update', 'Deadline Update')
+    ]
+    
+    # Core relationships
+    response = models.ForeignKey(OBSPResponse, on_delete=models.CASCADE, related_name='notes')
+    milestone = models.ForeignKey(OBSPMilestone, on_delete=models.SET_NULL, null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    
+    # Note details
+    note_type = models.CharField(max_length=20, choices=NOTE_TYPE_CHOICES)
+    title = models.CharField(max_length=255, blank=True)
+    content = models.TextField()
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_private = models.BooleanField(default=False, help_text="Internal notes only visible to admins")
+    
+    # For milestone-specific feedback
+    milestone_status = models.CharField(max_length=20, choices=OBSPMilestone.STATUS_CHOICES, blank=True)
+    quality_rating = models.FloatField(null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(5)])
+    is_aknowledged = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['response', 'note_type']),
+            models.Index(fields=['milestone', 'note_type']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.get_note_type_display()} - {self.response} - {self.created_at.strftime('%Y-%m-%d')}"
+
+    def get_note_type_display_name(self):
+        """Get display name with milestone context"""
+        if self.milestone:
+            return f"{self.get_note_type_display()} - {self.milestone.title}"
+        return self.get_note_type_display()
+
+    def is_visible_to_user(self, user):
+        """Check if note is visible to specific user"""
+        if self.is_private and user.role != 'admin':
+            return False
+        
+        # Client can see client feedback and milestone feedback
+        if user.role == 'client' and self.note_type in ['client_feedback', 'milestone_feedback']:
+            return True
+        
+        # Freelancer can see their own notes and milestone feedback
+        if user.role == 'freelancer' and self.created_by == user:
+            return True
+        
+        # Admins can see all notes
+        if user.role == 'admin':
+            return True
+        
+        return False
+
+class OBSPAssignmentHistory(models.Model):
+    """Tracks all status changes and important actions"""
+    ACTION_CHOICES = [
+        ('status_change', 'Status Changed'),
+        ('note_added', 'Note Added'),
+        ('file_uploaded', 'File Uploaded'),
+        ('payout_processed', 'Payout Processed')
+    ]
+    
+    assignment = models.ForeignKey(OBSPAssignment, on_delete=models.CASCADE)
+    milestone = models.ForeignKey(OBSPMilestone, null=True, blank=True, on_delete=models.SET_NULL)
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    details = models.JSONField(default=dict)  # {from: 'pending', to: 'in_progress'}
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+

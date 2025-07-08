@@ -100,6 +100,7 @@ class Transaction(models.Model):
         ('project', 'Project Payment'),
         ('milestone', 'Milestone Payment'),
         ('task', 'Task Payment'),
+        ('obsp', 'OBSP Payment'),
         ('withdrawal', 'Withdrawal'),
         ('refund', 'Refund'),
         ('subscription', 'Subscription Payment'),
@@ -169,6 +170,30 @@ class Transaction(models.Model):
         related_name='transactions'
     )
     
+    # Add OBSP support
+    obsp_response = models.ForeignKey(
+        'OBSP.OBSPResponse',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transactions'
+    )
+    obsp_assignment = models.ForeignKey(
+        'OBSP.OBSPAssignment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transactions'
+    )
+    obsp_milestone = models.ForeignKey(
+        'OBSP.OBSPMilestone',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transactions'
+    )
+
+
     # Transaction details
     description = models.CharField(max_length=255, blank=True)
     transaction_id = models.CharField(max_length=100, unique=True)
@@ -261,6 +286,7 @@ class Transaction(models.Model):
         related_name='id_verified_transactions'
     )
     id_verified_at = models.DateTimeField(null=True, blank=True)
+    
     
     objects = TransactionManager()
     

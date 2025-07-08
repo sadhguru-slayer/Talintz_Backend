@@ -136,6 +136,7 @@ class Project(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField()
     budget = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    start_date = models.DateField(null=True, blank=True)
     deadline = models.DateField()
     is_collaborative = models.BooleanField(default=False)
     domain = models.ForeignKey(Category, on_delete=models.CASCADE)
@@ -892,18 +893,41 @@ class Notification(models.Model):
         ('Payments', 'Payments'),
         ('Projects', 'Projects'),
         ('Events', 'Events'),
-        ('Projects & Tasks', 'Projects & Tasks'),
-        ('Connections', 'Connections'),
+        ('Workspace', 'Workspace'),
+        ('Revisions', 'Revisions'),
+        ('OBSP', 'OBSP'),
+        ('Instructions', 'Instructions'),
         ('System', 'System'),
-        ('Collaborations', 'Collaborations'),
+        # Add more as needed
     ]
-    title = models.CharField(null=True,max_length=200)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    PRIORITY_CHOICES = [
+        ('info', 'Info'),
+        ('success', 'Success'),
+        ('warning', 'Warning'),
+        ('error', 'Error'),
+        ('urgent', 'Urgent'),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
-    related_model_id = models.PositiveIntegerField()
+    subtype = models.CharField(max_length=50, blank=True, null=True)  # e.g. 'revision_created', 'workspace_instruction'
+    title = models.CharField(null=True, max_length=200)
     notification_text = models.TextField()
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='info')
+
+    # Generic relation to any model (Workspace, WorkspaceRevision, OBSPMilestone, Project, etc.)
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
+    # object_id = models.PositiveIntegerField(null=True, blank=True)
+    related_model_id = models.PositiveIntegerField(null=True, blank=True)
+    related_object = GenericForeignKey('content_type', 'related_model_id')
+
+    # Flexible metadata for extra context (e.g., milestone title, revision number, etc.)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
     def __str__(self):
         return f"Notification for {self.user.username}: {self.notification_text}"
@@ -1487,6 +1511,28 @@ class Reward(models.Model):
         except Exception as e:
             print(f"Error adding reward to wallet: {e}")
             return False
+
+class ProjectMilestoneNote(models.Model):
+    NOTE_TYPE_CHOICES = [
+        ('client_feedback', 'Client Feedback'),
+        ('freelancer_note', 'Freelancer Note'),
+        ('internal_note', 'Internal Note'),
+        ('milestone_feedback', 'Milestone Feedback'),
+    ]
+    milestone = models.ForeignKey('core.Milestone', on_delete=models.CASCADE, related_name='notes')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    note_type = models.CharField(max_length=20, choices=NOTE_TYPE_CHOICES)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_private = models.BooleanField(default=False)
+    is_aknowledged = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_note_type_display()} - {self.milestone.title} - {self.created_by.username}"
 
 
         

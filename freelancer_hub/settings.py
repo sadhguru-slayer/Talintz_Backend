@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     'core',
     'chat',
     'OBSP',
+    'workspace',
     'Profile',
     'freelancer',
     'collaborations',
