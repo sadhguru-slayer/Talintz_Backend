@@ -60,6 +60,34 @@ class WorkspaceAttachment(models.Model):
         return f"Attachment {self.id} for {self.content_object}"
 
 
+class WorkspaceBox(models.Model):
+    """
+    Represents a container (box) for attachments related to a specific workspace item,
+    to organize files and prevent confusion across contexts.
+    """
+
+    APPROVAL_CHOICES = [
+        ('submitted', 'Submitted'),
+        ('viewed', 'Viewed'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    workspace = models.ForeignKey(Workspace, related_name='boxes', on_delete=models.CASCADE)
+    title = models.CharField(max_length=255, help_text="A descriptive title for this box, e.g., 'Milestone 1 Submission'")
+    description = models.TextField(blank=True, null=True, help_text="Optional description or instructions for this box")
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, help_text="The type of object this box relates to (e.g., Milestone)")
+    object_id = models.PositiveIntegerField(help_text="The ID of the related object (e.g., Milestone ID)")
+    content_object = GenericForeignKey('content_type', 'object_id')
+    attachments = models.ManyToManyField(WorkspaceAttachment, related_name='boxes', blank=True, help_text="Attachments included in this box")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    status = models.CharField(max_length=50,choices=APPROVAL_CHOICES,default="submitted" )
+
+    def __str__(self):
+        return f"Workspace Box '{self.title}' for {self.content_object} in Workspace {self.workspace.id}"
+
+
 class WorkspaceRevision(models.Model):
     workspace = models.ForeignKey(Workspace, related_name='revisions', on_delete=models.CASCADE)
     # Generic relation to either Milestone (Project) or OBSPMilestone (OBSP)
@@ -134,6 +162,10 @@ class WorkspaceActivity(models.Model):
         ('file_uploaded', 'File Uploaded'),
         ('file_downloaded', 'File Downloaded'),
         ('file_deleted', 'File Deleted'),
+        # Box Activities
+        ('box_uploaded', 'Box Uploaded'),
+        ('box_downloaded', 'Box Downloaded'),
+        ('box_deleted', 'Box Deleted'),
         
         # Revision Activities
         ('revision_requested', 'Revision Requested'),
@@ -187,6 +219,11 @@ class WorkspaceActivity(models.Model):
     revision = models.ForeignKey(WorkspaceRevision, null=True, blank=True, on_delete=models.SET_NULL)
     dispute = models.ForeignKey(WorkspaceDispute, null=True, blank=True, on_delete=models.SET_NULL)
     
+    # Add these new fields for linking to related objects like notes
+    content_type = models.ForeignKey(ContentType, on_delete=models.SET_NULL, null=True, blank=True)
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    related_object = GenericForeignKey('content_type', 'object_id')
+
     # Simple metadata - No complex JSON, just what you need
     title = models.CharField(max_length=255, blank=True)  # Human-readable title
     description = models.TextField(blank=True)  # Brief description

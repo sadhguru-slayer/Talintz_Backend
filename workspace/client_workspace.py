@@ -3,7 +3,7 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from workspace.models import Workspace
+from workspace.models import Workspace,WorkspaceBox
 from OBSP.models import OBSPLevel
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.permissions import IsAuthenticated
@@ -22,6 +22,7 @@ from rest_framework.views import APIView
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
 from workspace.models import WorkspaceActivity
+from django.contrib.contenttypes.fields import GenericForeignKey
 
 
 def get_workspace_payment_summary(workspace):
@@ -60,7 +61,6 @@ def get_workspace_payment_summary(workspace):
 @permission_classes([IsAuthenticated])
 def client_overview(request, workspace_id):
     user = request.user
-    print(f"User: {user.username}, Workspace ID: {workspace_id}")  # Debug log
 
     try:
         workspace = Workspace.objects.get(
@@ -73,7 +73,6 @@ def client_overview(request, workspace_id):
 
     # 2. Get the content object (Project or OBSPResponse)
     content_object = workspace.content_object
-    print(f"Content object: {content_object}")  # Debug log
 
     # 3. Get participants
     participants = []
@@ -364,24 +363,27 @@ def client_overview(request, workspace_id):
         }
     }
 
-    print(data)
     return Response(data)
 
 
-def serialize_history(act):
-        return {
-            "action": act.get_activity_type_display(),
-            "by": act.user.username,
-            "details": act.description or act.title,
-            "time": act.timestamp.strftime("%Y-%m-%d %H:%M"),
-        }
+def serialize_history(act, request_user):
+    # Filter or check privacy before serializing
+    if act.activity_type == 'note_added':
+        if act.related_object:  # Check if there's a linked object (e.g., a note)
+            note = act.related_object  # This could be ProjectMilestoneNote or OBSPAssignmentNote
+            if getattr(note, 'is_private', False) and note.created_by != request_user:
+                return None  # Skip this activity if it's private and not created by the user
+    return {
+        "action": act.get_activity_type_display(),
+        "by": act.user.username,
+        "details": act.description or act.title,
+        "time": act.timestamp.strftime("%Y-%m-%d %H:%M"),
+    }
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def client_milestones(request, workspace_id):
     user = request.user
-    print(f"User: {user.username}, Workspace ID: {workspace_id}")  # Debug log
-
     # 1. Get the workspace where the user is a client participant
     try:
         workspace = Workspace.objects.get(id=workspace_id, participants__user=user, participants__role='client')
@@ -398,9 +400,64 @@ def client_milestones(request, workspace_id):
     if hasattr(content_object, 'milestones'):
         # Case: Project
         milestones_qs = content_object.milestones.all()
-        milestones = []
         for m in milestones_qs:
             milestone_activities = [a for a in activities if a.milestone_id == m.id]
+            
+            # Fetch attachments for this milestone
+            milestone_attachments = WorkspaceAttachment.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),
+                object_id=m.id
+            ).order_by('-uploaded_at')
+            
+            # First, fetch boxes for this milestone to get their attachments
+            boxes = WorkspaceBox.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),
+                object_id=m.id
+            ).prefetch_related('attachments')
+            
+            box_attachment_ids = set(attachment.id for box in boxes for attachment in box.attachments.all())
+            
+            # Now filter regular submissions to exclude attachments in boxes
+            regular_submissions = [
+                {
+                    "id": att.id,
+                    "name": att.file.name.split('/')[-1] if att.file else att.link.split('/')[-1] if att.link else "Link",
+                    "type": "file" if att.file else "link",
+                    "url": request.build_absolute_uri(att.file.url) if att.file else request.build_absolute_uri(att.link) if att.link else None,
+                    "submittedAt": att.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                    "uploadedBy": att.uploaded_by.username
+                }
+                for att in milestone_attachments if att.id not in box_attachment_ids
+            ]
+            
+            # Fetch boxes for this milestone using content_type and object_id
+            boxes = WorkspaceBox.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),  # Use actual content_type
+                object_id=m.id  # Use object_id
+            ).prefetch_related('attachments')  # Use prefetch_related for ManyToMany
+            
+            serialized_boxes = [
+                {
+                    "id": box.id,
+                    "title": box.title,
+                    "description": box.description,
+                    "status": box.status,  # Added: Include the box's status
+                    "files": [
+                        {
+                            "id": attachment.id,
+                            "name": attachment.file.name.split('/')[-1] if attachment.file else attachment.link.split('/')[-1] if attachment.link else "Link",
+                            "type": "file" if attachment.file else "link",
+                            "url": request.build_absolute_uri(attachment.file.url) if attachment.file else request.build_absolute_uri(attachment.link) if attachment.link else None,
+                            "uploadedBy": attachment.uploaded_by.username,
+                            "uploadedAt": attachment.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                        } for attachment in box.attachments.all()
+                    ]
+                } for box in boxes
+            ]
+            
             milestones.append({
                 "id": m.id,
                 "title": m.title,
@@ -415,7 +472,9 @@ def client_milestones(request, workspace_id):
                     "status": m.status,
                     "autoPay": False
                 },
-                "history": [serialize_history(a) for a in milestone_activities]
+                "history": [serialize_history(a, user) for a in milestone_activities],
+                "submissions": regular_submissions,  # Only non-box attachments
+                "boxes": serialized_boxes  # Boxes remain separate
             })
         
     elif hasattr(content_object, 'template'):
@@ -433,7 +492,7 @@ def client_milestones(request, workspace_id):
         # Get assignment details for deadline calculation
         assignment = OBSPAssignment.objects.filter(
             obsp_response=obsp_response,
-            assigned_by=user,
+            assigned_by=user
         ).first()
         
         # Get milestones only for this specific level and calculate deadlines
@@ -478,9 +537,10 @@ def client_milestones(request, workspace_id):
                 "client_feedback": feedbacks,
                 "freelancer_notes": list(obsp_response.notes.filter(
                     note_type='freelancer_note', 
-                    milestone=m
+                    milestone=m,
+                    is_private=False
                 ).values('id', 'content', 'created_at')),
-                # Internal notes only visible to admins/client who created them
+                # Internal notes only visible to admins/freelancer who created them
                 "internal_notes": list(obsp_response.notes.filter(
                     note_type='internal_note',
                     milestone=m,
@@ -488,27 +548,59 @@ def client_milestones(request, workspace_id):
                 ).values('id', 'content', 'created_at')) if user.role == 'client' else []
             }
             
-            # Get submissions from OBSP attachments
-            submissions = []
-            if assignment:
-                # Get attachments related to this milestone
-                milestone_attachments = WorkspaceAttachment.objects.filter(
-                    workspace=workspace,
-                    content_type=ContentType.objects.get_for_model(m),
-                    object_id=m.id
-                ).order_by('-uploaded_at')
-                
-                submissions = [
-                    {
-                        "id": att.id,
-                        "name": att.file.name.split('/')[-1] if att.file else att.link.split('/')[-1] if att.link else "Link",
-                        "type": "file" if att.file else "link",
-                        "url": request.build_absolute_uri(att.file.url) if att.file else request.build_absolute_uri(att.link) if att.link else None,
-                        "submittedAt": att.uploaded_at.strftime("%Y-%m-%d %H:%M"),
-                        "uploadedBy": att.uploaded_by.username
-                    }
-                    for att in milestone_attachments
-                ]
+            # Fetch attachments and separate boxes from regular submissions
+            milestone_attachments = WorkspaceAttachment.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),
+                object_id=m.id
+            ).order_by('-uploaded_at')
+            
+            boxes = WorkspaceBox.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),  # Use actual content_type
+                object_id=m.id  # Use object_id
+            ).prefetch_related('attachments')  # Use prefetch_related for ManyToMany
+            
+            box_attachment_ids = set(attachment.id for box in boxes for attachment in box.attachments.all())
+            
+            regular_submissions = [
+                {
+                    "id": att.id,
+                    "name": att.file.name.split('/')[-1] if att.file else att.link.split('/')[-1] if att.link else "Link",
+                    "type": "file" if att.file else "link",
+                    "url": request.build_absolute_uri(att.file.url) if att.file else request.build_absolute_uri(att.link) if att.link else None,
+                    "submittedAt": att.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                    "uploadedBy": att.uploaded_by.username
+                }
+                for att in milestone_attachments if att.id not in box_attachment_ids  # Exclude attachments in boxes
+            ]
+            
+            # Fetch boxes for this milestone using content_type and object_id
+            boxes = WorkspaceBox.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),  # Use actual content_type
+                object_id=m.id  # Use object_id
+            ).prefetch_related('attachments')  # Use prefetch_related for ManyToMany
+            
+            serialized_boxes = [
+                {
+                    "id": box.id,
+                    "title": box.title,
+                    "description": box.description,
+                    "status": box.status,  # Added: Include the box's status
+                    "files": [
+                        {
+                            "id": attachment.id,
+                            "name": attachment.file.name.split('/')[-1] if attachment.file else attachment.link.split('/')[-1] if attachment.link else "Link",
+                            "type": "file" if attachment.file else "link",
+                            "url": request.build_absolute_uri(attachment.file.url) if attachment.file else request.build_absolute_uri(attachment.link) if attachment.link else None,
+                            "uploadedBy": attachment.uploaded_by.username,
+                            "uploadedAt": attachment.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                        } for attachment in box.attachments.all()
+                    ]
+                } for box in boxes
+            ]
+            
             milestone_id_str = str(m.id)
             status = milestone_progress.get(milestone_id_str, m.status)  # fallback to model status if not set
             
@@ -525,7 +617,7 @@ def client_milestones(request, workspace_id):
                     "status": status,
                     "autoPay": False
                 },
-                "history": [serialize_history(a) for a in milestone_activities],
+                "history": [serialize_history(a, user) for a in milestone_activities],
                   # Add history if available
                 # OBSP-specific fields
                 "milestone_type": m.milestone_type,
@@ -534,7 +626,8 @@ def client_milestones(request, workspace_id):
                 "deadline": deadline,
                 "payout_percentage": float(m.payout_percentage),
                 "notes": milestone_notes,
-                "submissions": submissions,
+                "submissions": regular_submissions,  # Only non-box attachments
+                "boxes": serialized_boxes  # Boxes remain separate
             }
             milestones.append(milestone_data)
 
@@ -702,8 +795,6 @@ def workspace_payments(request, workspace_id):
                 for tx in transactions
             ]
         })
-
-
 
 class WorkspaceRevisionsAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -922,7 +1013,6 @@ class WorkspaceRevisionsAPIView(APIView):
             traceback.print_exc()
             return Response({"detail": str(e)}, status=400)
 
-
 class WorkspaceNotificationsAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -984,3 +1074,51 @@ def mark_notification_read(request, workspace_id, notification_id):
     notification.is_read = True
     notification.save(update_fields=["is_read"])
     return Response({"success": True, "id": notification.id, "is_read": True}, status=status.HTTP_200_OK)
+
+
+
+# Actions
+
+# Create a API view for Box actions as requested
+class BoxActionAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, box_id, action):
+        """
+        Handle approve or reject actions for a specific box.
+        Endpoint: /api/workspace/client/box/{box_id}/{action} where action is 'approve' or 'reject'.
+        """
+        user = request.user
+        try:
+            box = WorkspaceBox.objects.get(id=box_id)
+            workspace = box.workspace  # Get the associated workspace
+            
+            # Ensure the user is a client participant in the workspace
+            if not workspace.participants.filter(user=user, role='client').exists():
+                return Response({"error": "Access denied. You must be a client in this workspace."}, status=403)
+            
+            if action not in ['approve', 'viewed']:
+                return Response({"error": "Invalid action. Use 'approve' or 'reject'."}, status=400)
+            
+            if action == 'approve':
+                box.status = 'approved'
+            elif action == 'viewed':
+                box.status = 'viewed'
+            
+            box.save()
+            
+            return Response({
+                "success": True,
+                "box_id": box.id,
+                "new_status": box.status,
+                "message": f"Box has been {action}d successfully."
+            }, status=200)
+        
+        except WorkspaceBox.DoesNotExist:
+            return Response({"error": "Box not found."}, status=404)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500) 
+        
+
+
+        

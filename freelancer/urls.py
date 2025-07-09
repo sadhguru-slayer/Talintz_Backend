@@ -15,6 +15,7 @@ from .profileViews import (
     ProfilePictureUpdateView,
 )
 from .projectRecommendation import ProjectRecommendationView, BrowseProjectsView
+from .dashboard_views import freelancer_workspaces,assigned_projects, ProjectDetailsAPIView
 
 router = DefaultRouter()
 router.register(r'homepage', FreelancerViewSet, basename='homepage')
@@ -40,5 +41,11 @@ path('update_profile/portfolio/', PortfolioUpdateView.as_view(), name='update_po
 path('update_profile/certifications/', CertificationsUpdateView.as_view(), name='update_certifications'),
 path('update_profile/banking/', BankingUpdateView.as_view(), name='update_banking'),
 path('update_profile_picture/', ProfilePictureUpdateView.as_view(), name='update_profile_picture'),
+
+# Projects and workspaces
+    path('assigned-projects/', assigned_projects, name='assigned_projects'),
+    path('workspaces/', freelancer_workspaces, name='freelancer_workspaces'),
+    path('project-details/<int:project_id>/', ProjectDetailsAPIView.as_view(), name='freelancer_project_details'),
+
 ]
 

@@ -16,7 +16,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
-from workspace.models import WorkspaceActivity
+from workspace.models import WorkspaceActivity,WorkspaceBox
+from django.contrib.contenttypes.fields import GenericForeignKey
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -336,6 +337,8 @@ def freelancer_overview(request, workspace_id):
     print(data)
     return Response(data)
 
+
+# Milestone
 def serialize_history(act):
         return {
             "action": act.get_activity_type_display(),
@@ -366,9 +369,60 @@ def freelancer_milestones(request, workspace_id):
     if hasattr(content_object, 'milestones'):
         # Case: Project
         milestones_qs = content_object.milestones.all()
-        milestones = []
         for m in milestones_qs:
             milestone_activities = [a for a in activities if a.milestone_id == m.id]
+            
+            # Fetch attachments for this milestone, excluding those in any box
+            milestone_attachments = WorkspaceAttachment.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),
+                object_id=m.id
+            ).exclude(
+                id__in=WorkspaceBox.objects.filter(
+                    workspace=workspace,
+                    content_type=ContentType.objects.get_for_model(m),
+                    object_id=m.id
+                ).values('attachments__id')
+            ).order_by('-uploaded_at')
+            
+            regular_submissions = [
+                {
+                    "id": att.id,
+                    "name": att.file.name.split('/')[-1] if att.file else att.link.split('/')[-1] if att.link else "Link",
+                    "type": "file" if att.file else "link",
+                    "url": request.build_absolute_uri(att.file.url) if att.file else request.build_absolute_uri(att.link) if att.link else None,
+                    "submittedAt": att.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                    "uploadedBy": att.uploaded_by.username
+                }
+                for att in milestone_attachments  # Now excludes box attachments
+            ]
+            
+            # Fetch boxes for this milestone using content_type and object_id
+            boxes = WorkspaceBox.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),  # Use actual content_type
+                object_id=m.id  # Use object_id
+            ).prefetch_related('attachments')  # Use prefetch_related for ManyToMany
+            
+            serialized_boxes = [
+                {
+                    "id": box.id,
+                    "title": box.title,
+                    "description": box.description,
+                    "status":box.status,
+                    "files": [
+                        {
+                            "id": attachment.id,
+                            "name": attachment.file.name.split('/')[-1] if attachment.file else attachment.link.split('/')[-1] if attachment.link else "Link",
+                            "type": "file" if attachment.file else "link",
+                            "url": request.build_absolute_uri(attachment.file.url) if attachment.file else request.build_absolute_uri(attachment.link) if attachment.link else None,
+                            "uploadedBy": attachment.uploaded_by.username,
+                            "uploadedAt": attachment.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                        } for attachment in box.attachments.all()
+                    ]
+                } for box in boxes
+            ]
+            
             milestones.append({
                 "id": m.id,
                 "title": m.title,
@@ -383,7 +437,9 @@ def freelancer_milestones(request, workspace_id):
                     "status": m.status,
                     "autoPay": False
                 },
-                "history": [serialize_history(a) for a in milestone_activities]
+                "history": [serialize_history(a) for a in milestone_activities],
+                "submissions": regular_submissions,  # Only non-box submissions
+                "boxes": serialized_boxes  # Add boxes list
             })
         
     elif hasattr(content_object, 'template'):
@@ -456,17 +512,20 @@ def freelancer_milestones(request, workspace_id):
                 ).values('id', 'content', 'created_at')) if user.role == 'freelancer' else []
             }
             
-            # Get submissions from OBSP attachments
-            submissions = []
-            if assignment:
-                # Get attachments related to this milestone
-                milestone_attachments = WorkspaceAttachment.objects.filter(
+            # Fetch attachments for this milestone, excluding those in any box
+            milestone_attachments = WorkspaceAttachment.objects.filter(
                     workspace=workspace,
                     content_type=ContentType.objects.get_for_model(m),
                     object_id=m.id
+            ).exclude(
+                id__in=WorkspaceBox.objects.filter(
+                    workspace=workspace,
+                    content_type=ContentType.objects.get_for_model(m),
+                    object_id=m.id
+                ).values('attachments__id')
                 ).order_by('-uploaded_at')
                 
-                submissions = [
+            regular_submissions = [
                     {
                         "id": att.id,
                         "name": att.file.name.split('/')[-1] if att.file else att.link.split('/')[-1] if att.link else "Link",
@@ -475,8 +534,35 @@ def freelancer_milestones(request, workspace_id):
                         "submittedAt": att.uploaded_at.strftime("%Y-%m-%d %H:%M"),
                         "uploadedBy": att.uploaded_by.username
                     }
-                    for att in milestone_attachments
+                for att in milestone_attachments  # Now excludes box attachments
                 ]
+            
+            # Fetch boxes for this milestone using content_type and object_id
+            boxes = WorkspaceBox.objects.filter(
+                workspace=workspace,
+                content_type=ContentType.objects.get_for_model(m),  # Use actual content_type
+                object_id=m.id  # Use object_id
+            ).prefetch_related('attachments')  # Use prefetch_related for ManyToMany
+            
+            serialized_boxes = [
+                {
+                    "id": box.id,
+                    "title": box.title,
+                    "description": box.description,
+                    "status":box.status,
+                    "files": [
+                        {
+                            "id": attachment.id,
+                            "name": attachment.file.name.split('/')[-1] if attachment.file else attachment.link.split('/')[-1] if attachment.link else "Link",
+                            "type": "file" if attachment.file else "link",
+                            "url": request.build_absolute_uri(attachment.file.url) if attachment.file else request.build_absolute_uri(attachment.link) if attachment.link else None,
+                            "uploadedBy": attachment.uploaded_by.username,
+                            "uploadedAt": attachment.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                        } for attachment in box.attachments.all()
+                    ]
+                } for box in boxes
+            ]
+            
             milestone_id_str = str(m.id)
             status = milestone_progress.get(milestone_id_str, m.status)  # fallback to model status if not set
             
@@ -502,7 +588,8 @@ def freelancer_milestones(request, workspace_id):
                 "deadline": deadline,
                 "payout_percentage": float(m.payout_percentage),
                 "notes": milestone_notes,
-                "submissions": submissions,
+                "submissions": regular_submissions,  # Only regular submissions
+                "boxes": serialized_boxes  # Add boxes list
             }
             milestones.append(milestone_data)
 
@@ -776,8 +863,14 @@ def submit_milestone_deliverables(request, workspace_id, milestone_type, milesto
     else:
         return Response({"error": "Invalid milestone type"}, status=400)
 
-    # Handle file uploads
+    attachment_type = request.data.get('attachment_type', 'single')  # Default to 'single'
+    title = request.data.get('title', None)  # For box title
+    description = request.data.get('description', None)  # For box description
     files = request.FILES.getlist('files')
+
+    attachments = []  # List to hold created attachments
+
+    # Create attachments
     for f in files:
         attachment = WorkspaceAttachment.objects.create(
             workspace=workspace,
@@ -786,19 +879,49 @@ def submit_milestone_deliverables(request, workspace_id, milestone_type, milesto
             file=f,
             uploaded_by=user
         )
-        # Create workspace activity for each file
+        attachments.append(attachment)  # Add to list for later use in box
+
+        # Create activity only if attachment_type is 'single'
+        if attachment_type == 'single':
+            WorkspaceActivity.objects.create(
+                workspace=workspace,
+                activity_type='file_uploaded',
+                user=user,
+                attachment=attachment,
+                milestone=milestone if milestone_type == 'project' else None,
+                obsp_milestone=milestone if milestone_type == 'obsp' else None,
+                title="Deliverable Submitted",
+                description=f.name
+            )
+
+    if attachment_type == 'box' and title:  # Only create box if attachment_type is 'box' and title is provided
+        content_type_model = ContentType.objects.get(model='obspmilestone') if milestone_type == 'obsp' else ContentType.objects.get(model='milestone')
+        
+        workspace_box = WorkspaceBox.objects.create(
+            workspace=workspace,
+            title=title,
+            description=description,
+            content_type=content_type_model,
+            object_id=milestone_id  # Link to the milestone
+        )
+        
+        # Associate attachments with the box
+        workspace_box.attachments.set(attachments)
+
+        # Create a unified activity for the box
         WorkspaceActivity.objects.create(
             workspace=workspace,
-            activity_type='file_uploaded',
+            activity_type='box_uploaded',  # New activity type for boxes
             user=user,
-            attachment=attachment,
             milestone=milestone if milestone_type == 'project' else None,
             obsp_milestone=milestone if milestone_type == 'obsp' else None,
-            title="Deliverable Submitted",
-            description=f.name
+            title=f"Box Submitted: {title}",
+            description=f"Box with {len(attachments)} files submitted for milestone {milestone_id}. Description: {description}"
         )
 
-    return Response({"success": True})
+        return Response({"success": True, "box_id": workspace_box.id})
+
+    return Response({"success": True})  # For single attachments
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -950,17 +1073,22 @@ def post_milestone_note(request, workspace_id, milestone_type, milestone_id):
             milestone=milestone,
             created_by=user,
             note_type='freelancer_note',
-            content=content
+            content=content,
+            is_private=True  # Assuming it's private based on context; adjust as needed
         )
-        # Create workspace activity
+        
+        # Create workspace activity with link to the note
         WorkspaceActivity.objects.create(
             workspace=workspace,
             activity_type='note_added',
             user=user,
-            milestone=milestone,
-            title="Freelancer Note Added",
-            description=content
+            milestone=milestone,  # Keep existing reference if needed
+            title="Freelancer Note Added Privately",
+            description=content,
+            content_type=ContentType.objects.get_for_model(note),  # Link to the note
+            object_id=note.id  # Link to the note's ID
         )
+    
     elif milestone_type == 'obsp':
 
         milestone = get_object_or_404(OBSPMilestone, id=milestone_id)
@@ -974,16 +1102,20 @@ def post_milestone_note(request, workspace_id, milestone_type, milestone_id):
                 milestone=milestone,
                 created_by=user,
                 note_type='freelancer_note',
+                is_private=True,
                 content=content
             )
-            # Create workspace activity
+            
+            # Create workspace activity with link to the note
             WorkspaceActivity.objects.create(
                 workspace=workspace,
                 activity_type='note_added',
                 user=user,
                 obsp_milestone=milestone,
-                title="Freelancer Note Added",
-                description=content
+                title="Freelancer Note Added Privately",
+                description=content,
+                content_type=ContentType.objects.get_for_model(note),  # Link to the note
+                object_id=note.id  # Link to the note's ID
             )
         else:
             return Response({"detail": "No assignment found for this milestone and user."}, status=400)

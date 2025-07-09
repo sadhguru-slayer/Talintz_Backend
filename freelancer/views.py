@@ -1836,6 +1836,13 @@ class InvitationResponseViewSet(viewsets.ViewSet):
                             user=freelancer,
                             role='freelancer'
                         )
+            
+                milestones = project.milestones.order_by('due_date')
+                if milestones.exists():
+                    first_milestone = milestones.first()
+                    if first_milestone.status == 'pending':
+                        first_milestone.status = 'in_progress'
+                        first_milestone.save()
 
                 return Response({
                     'status': 'success',

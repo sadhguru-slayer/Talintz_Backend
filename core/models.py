@@ -945,7 +945,10 @@ class Milestone(models.Model):
     ]
     STATUS_CHOICES = [
         ('pending', 'Pending'),
+        ('in_progress', 'In Progress'),
+        ('completed', 'Completed'),
         ('approved', 'Approved'),
+        ('delivered', 'Delivered'),
         ('paid', 'Paid'),
     ]
     

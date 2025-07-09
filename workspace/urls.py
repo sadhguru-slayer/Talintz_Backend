@@ -1,8 +1,16 @@
 from django.urls import path
 from .freelancer_workspace import freelancer_overview, freelancer_milestones, workspace_payments,WorkspaceRevisionsAPIView, WorkspaceNotificationsAPIView, mark_notification_read, submit_milestone_deliverables, request_milestone_revision, acknowledge_milestone_feedback, post_milestone_note
 from workspace import client_workspace,views   # Import your new view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from workspace.models import Workspace
+from rest_framework.views import APIView
+from workspace.models import WorkspaceBox
 
 urlpatterns = [
+    # Workspace type
+    path('workspace_type/<int:workspace_id>/', views.workspace_type, name='workspace_type'),
     # Freelancer urls
     path('freelancer/overview/<int:workspace_id>/', freelancer_overview, name='freelancer_workspace_overview'),
     path('freelancer/milestones/<int:workspace_id>/', freelancer_milestones, name='freelancer_workspace_milestones'),
@@ -22,5 +30,5 @@ urlpatterns = [
     path('client/revisions/<int:workspace_id>/', client_workspace.WorkspaceRevisionsAPIView.as_view(), name='client_workspace_revisions'),
     path('client/notifications/<int:workspace_id>/', views.WorkspaceNotificationsAPIView.as_view(), name='client_workspace_notifications'),
     path('client/notifications/<int:workspace_id>/<int:notification_id>/read/', views.mark_notification_read, name='client_notification_mark_read'),
-
+    path('client/box/<int:box_id>/<str:action>/', client_workspace.BoxActionAPIView.as_view(), name='client_box_action'),
 ]

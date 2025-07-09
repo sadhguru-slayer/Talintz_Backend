@@ -76,3 +76,15 @@ def mark_notification_read(request, workspace_id, notification_id):
     notification.save(update_fields=["is_read"])
     return Response({"success": True, "id": notification.id, "is_read": True}, status=status.HTTP_200_OK)
 
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def workspace_type(request, workspace_id):
+    try:
+        workspace = Workspace.objects.get(id=workspace_id, participants__user=request.user)
+    except Workspace.DoesNotExist:
+        return Response({"error": "Workspace not found or access denied"}, status=404)
+    content_object = workspace.content_object
+    workspace_type = "obsp" if hasattr(content_object, 'template') else "project"
+    return Response({"type": workspace_type})
+
