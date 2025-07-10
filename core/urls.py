@@ -8,11 +8,14 @@ from rest_framework.routers import DefaultRouter
 from .connectionViews import ConnectionManageViewSet, ConnectionView, ConnectionRequestView, GetConnectionStatusView
 from .verifications_referalviews import SendEmailVerificationCode, VerifyEmailCode
 from .referrals import ReferralStatsView, ReferralHistoryView,UserReferralDataView
+from rest_framework import generics  # Assuming Skills model is defined in core/models.py
+from rest_framework import serializers  # For creating a simple serializer
 
 router = DefaultRouter()
 router.register(r'connections', ConnectionManageViewSet, basename='connection')
 
 urlpatterns = [
+    path('skills/', SkillsListView.as_view(), name='skills-list'),  # Complete the path and link to the view
     path('register/create_user/', RegisterView.as_view(), name='register'),
     path('register/check-email/', check_email_exists, name='check-email'),
     path('login/', LoginView.as_view(), name='login'),

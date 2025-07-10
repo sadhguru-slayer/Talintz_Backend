@@ -593,10 +593,10 @@ class OBSPMilestoneAdmin(admin.ModelAdmin):
 
 class OBSPResponseForm(forms.ModelForm):
     milestone_progress_text = forms.CharField(
-        label="Milestone Progress (one per line: milestone_id - status)",
+        label="Milestone Progress (one per line: milestone_id - status, deadline [Default/Extended])",
         required=False,
         widget=forms.Textarea(attrs={'rows': 5, 'style': 'width: 100%;'}),
-        help_text="Format: <code>milestone_id - status</code> (e.g. <code>21 - completed</code>)"
+        help_text="Format: <code>milestone_id - status, deadline [Default/Extended]</code> (e.g. <code>21 - completed, 2024-06-10 [Extended]</code>)"
     )
 
     class Meta:
@@ -607,20 +607,40 @@ class OBSPResponseForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         # Prepopulate the text field from the JSON
         progress = self.instance.milestone_progress or {}
-        lines = [f"{k} - {v}" for k, v in progress.items()]
+        lines = []
+        for k, v in progress.items():
+            if isinstance(v, dict):
+                status = v.get('status', '')
+                deadline = v.get('deadline', '')
+                deadline_type = v.get('deadline_type', 'Default')
+            else:
+                # Backward compatibility: v is just a status string
+                status = v
+                deadline = ''
+                deadline_type = 'Default'
+            lines.append(f"{k} - {status}, {deadline} [{deadline_type}]")
         self.fields['milestone_progress_text'].initial = "\n".join(lines)
 
     def clean_milestone_progress_text(self):
+        import re
         text = self.cleaned_data.get('milestone_progress_text', '')
         progress = {}
         for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue
-            if '-' not in line:
-                raise forms.ValidationError("Each line must be in the format: milestone_id - status")
-            milestone_id, status = line.split('-', 1)
-            progress[milestone_id.strip()] = status.strip()
+            # Regex to match: id - status, deadline [type]
+            match = re.match(r'^(\d+)\s*-\s*([a-zA-Z_]+)\s*,\s*([\d\-]+)\s*\[(Default|Extended)\]$', line)
+            if not match:
+                raise forms.ValidationError(
+                    "Each line must be in the format: milestone_id - status, deadline [Default/Extended] (e.g. 21 - completed, 2024-06-10 [Extended])"
+                )
+            milestone_id, status, deadline, deadline_type = match.groups()
+            progress[milestone_id.strip()] = {
+                'status': status.strip(),
+                'deadline': deadline.strip(),
+                'deadline_type': deadline_type.strip()
+            }
         return progress
 
     def save(self, commit=True):
@@ -1128,42 +1148,3 @@ class OBSPApplicationAdmin(admin.ModelAdmin):
             'reviewed_by',
             'eligibility_reference'
         )
-
-class OBSPResponseForm(forms.ModelForm):
-    milestone_progress_text = forms.CharField(
-        label="Milestone Progress (one per line: milestone_id - status)",
-        required=False,
-        widget=forms.Textarea(attrs={'rows': 5, 'style': 'width: 100%;'}),
-        help_text="Format: <code>milestone_id - status</code> (e.g. <code>21 - completed</code>)"
-    )
-
-    class Meta:
-        model = OBSPResponse
-        fields = '__all__'
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Prepopulate the text field from the JSON
-        progress = self.instance.milestone_progress or {}
-        lines = [f"{k} - {v}" for k, v in progress.items()]
-        self.fields['milestone_progress_text'].initial = "\n".join(lines)
-
-    def clean_milestone_progress_text(self):
-        text = self.cleaned_data.get('milestone_progress_text', '')
-        progress = {}
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if '-' not in line:
-                raise forms.ValidationError("Each line must be in the format: milestone_id - status")
-            milestone_id, status = line.split('-', 1)
-            progress[milestone_id.strip()] = status.strip()
-        return progress
-
-    def save(self, commit=True):
-        instance = super().save(commit=False)
-        instance.milestone_progress = self.cleaned_data.get('milestone_progress_text', {})
-        if commit:
-            instance.save()
-        return instance

@@ -33,10 +33,10 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.db import transaction
-from .models import User  # This will point to your custom User model if defined
+from .models import User,Skill  # This will point to your custom User model if defined
 from dateutil import parser
 from rest_framework import serializers
-from .serializers import ProjectResponseSerializer, TaskResponseSerializer
+from .serializers import SkillSerializer,ProjectResponseSerializer, TaskResponseSerializer
 import traceback
 from django.utils.dateparse import parse_date
 from django.db import IntegrityError
@@ -46,10 +46,18 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from financeapp.models.hold import Hold
 from financeapp.models import Wallet
 from freelancer.obsp_eligibility import OBSPEligibilityCalculator
+from rest_framework import generics
+from .models import Skill  # Assuming Skills model is defined in core/models.py
+from rest_framework import serializers  # For creating a simple serializer
 
-# Create your views here.
+class SkillsListView(generics.ListAPIView):
+    queryset = Skill.objects.all()
+    serializer_class = SkillSerializer
+
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
+
+
 
 class IsprofiledDetails(APIView):
     permission_classes = [IsAuthenticated]

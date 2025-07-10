@@ -4,7 +4,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib import admin
 from django.forms import Textarea
 import re
-from core.models import Category
+from core.models import Category, Skill
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
@@ -234,6 +234,77 @@ class OBSPResponse(models.Model):
     def get_selected_level_display(self):
         return dict(OBSPLevel.LEVEL_CHOICES).get(self.selected_level, self.selected_level)
 
+    def save(self, *args, **kwargs):
+        if not self.pk:  # This is a new instance
+            self.initialize_milestone_progress()
+        super().save(*args, **kwargs)
+
+    def initialize_milestone_progress(self):
+        """
+        Initialize milestone_progress when OBSPResponse is created.
+        Sets each milestone based on OBSPMilestone.order with status 'pending', deadline as empty string, and deadline_type as 'Default'.
+        """
+        milestones = OBSPMilestone.objects.filter(
+            template=self.template,
+            level__level=self.selected_level
+        ).order_by('order')  # Order by milestone order
+        
+        milestone_progress = {}
+        for milestone in milestones:
+            milestone_id = str(milestone.id)
+            milestone_progress[milestone_id] = {
+                'status': 'pending',
+                'deadline': '',  # Empty string as specified
+                'deadline_type': 'Default'
+            }
+        self.milestone_progress = milestone_progress
+
+    def calculate_and_set_milestone_deadlines(self):
+        """
+        Calculate and set deadlines for milestones based on the OBSPAssignment's assigned_at date.
+        After setting deadlines, update the first milestone's status to 'in_progress'.
+        """
+        try:
+            assignment = self.assignments.filter(status__in=['assigned', 'in_progress']).first()
+            if not assignment:
+                return  # No assignment, so no deadlines to calculate
+            
+            assigned_at = assignment.assigned_at
+            milestones = OBSPMilestone.objects.filter(
+                template=self.template,
+                level__level=self.selected_level
+            ).order_by('order')
+            
+            milestone_progress = self.milestone_progress or {}
+            current_date = assigned_at
+            
+            for milestone in milestones:
+                estimated_days = milestone.estimated_days
+                deadline_date = current_date + timezone.timedelta(days=estimated_days)
+                
+                milestone_id = str(milestone.id)
+                if milestone_id in milestone_progress and isinstance(milestone_progress[milestone_id], dict):
+                    milestone_progress[milestone_id]['deadline'] = deadline_date.strftime('%Y-%m-%d')
+                else:
+                    milestone_progress[milestone_id] = {
+                        'deadline': deadline_date.strftime('%Y-%m-%d'),
+                        'status': milestone_progress.get(milestone_id, {}).get('status', 'pending'),
+                        'deadline_type': milestone_progress.get(milestone_id, {}).get('deadline_type', 'Default')
+                    }
+                
+                current_date = deadline_date  # Chain to the next milestone
+            
+            # After setting deadlines, update the first milestone's status to 'in_progress'
+            if milestones.exists():
+                first_milestone_id = str(milestones.first().id)
+                if first_milestone_id in milestone_progress:
+                    milestone_progress[first_milestone_id]['status'] = 'in_progress'  # Set first to 'in_progress'
+            
+            self.milestone_progress = milestone_progress
+            self.save()
+        except Exception as e:
+            print(f"Error calculating deadlines: {e}")
+
     def assign_freelancer(self, freelancer, assigned_by=None, freelancer_payout=None, platform_fee=None):
         """Assign a freelancer to this OBSP response"""
         from django.utils import timezone
@@ -260,6 +331,9 @@ class OBSPResponse(models.Model):
         # Update OBSP response status
         self.status = 'processing'
         self.save()
+        
+        # Call the updated method to calculate deadlines and set statuses
+        self.calculate_and_set_milestone_deadlines()
         
         return assignment
 
@@ -369,13 +443,32 @@ class OBSPCriteria(models.Model):
     min_skill_match_percentage = models.FloatField(default=60.0, help_text="Minimum skill match percentage")
     
     # Skill Requirements (JSON for flexibility)
-    required_skills = models.JSONField(default=list, help_text="List of required skills")
-    core_skills = models.JSONField(default=list, help_text="Core skills that must be present")
-    optional_skills = models.JSONField(default=list, help_text="Optional skills that add bonus points")
-    
+    required_skills = models.ManyToManyField(
+        Skill,
+        related_name='required_in_criteria',
+        blank=True,
+        help_text="Required skills for this criteria"
+    )
+    core_skills = models.ManyToManyField(
+        Skill,
+        related_name='core_in_criteria',
+        blank=True,
+        help_text="Core skills for this criteria"
+    )
+    optional_skills = models.ManyToManyField(
+        Skill,
+        related_name='optional_in_criteria',
+        blank=True,
+        help_text="Optional skills for this criteria"
+    )
+    required_domains = models.ManyToManyField(
+        Category,  # Assuming Category is the model for domains
+        related_name='required_in_criteria',
+        blank=True,
+        help_text="Required domains for this criteria"
+    )
     # Project Experience Requirements
     min_project_budget = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Minimum project budget experience")
-    required_domains = models.JSONField(default=list, help_text="Required project domains")
     min_project_duration_days = models.PositiveIntegerField(default=7, help_text="Minimum project duration experience")
     
     # OBSP-Specific Requirements (for higher levels)
@@ -428,11 +521,11 @@ class OBSPCriteria(models.Model):
             'min_completed_projects': self.min_completed_projects,
             'min_avg_rating': self.min_avg_rating,
             'min_skill_match_percentage': self.min_skill_match_percentage,
-            'required_skills': self.required_skills,
-            'core_skills': self.core_skills,
-            'optional_skills': self.optional_skills,
+            'required_skills': list(self.required_skills.values_list('name', flat=True)),
+            'core_skills': list(self.core_skills.values_list('name', flat=True)),
+            'optional_skills': list(self.optional_skills.values_list('name', flat=True)),
             'min_project_budget': float(self.min_project_budget),
-            'required_domains': self.required_domains,
+            'required_domains': list(self.required_domains.values_list('name', flat=True)),
             'min_project_duration_days': self.min_project_duration_days,
             'min_obsp_completed': self.min_obsp_completed,
             'min_deadline_compliance': self.min_deadline_compliance,
@@ -492,12 +585,6 @@ class OBSPAssignment(models.Model):
         """Get total payout including platform fee"""
         return self.freelancer_payout + self.platform_fee
 
-    def update_progress(self, percentage, milestone=None):
-        """Update progress and milestone"""
-        self.progress_percentage = percentage
-        if milestone:
-            self.current_milestone = milestone
-        self.save()
 
     def start_work(self):
         """Mark assignment as started"""
@@ -638,6 +725,14 @@ class OBSPAssignment(models.Model):
             milestone=milestone,
             **kwargs
         )
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None  # Check if this is a new instance
+        super().save(*args, **kwargs)  # Save the instance first
+        
+        if is_new or self.status == 'assigned':  # Only run if new or status is set to 'assigned'
+            if self.obsp_response:
+                self.obsp_response.calculate_and_set_milestone_deadlines()
 
 class OBSPApplication(models.Model):
     """Freelancer application to work on an OBSP template level"""

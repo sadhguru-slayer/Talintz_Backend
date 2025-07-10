@@ -223,7 +223,7 @@ class WorkspaceActivity(models.Model):
     content_type = models.ForeignKey(ContentType, on_delete=models.SET_NULL, null=True, blank=True)
     object_id = models.PositiveIntegerField(null=True, blank=True)
     related_object = GenericForeignKey('content_type', 'object_id')
-
+    
     # Simple metadata - No complex JSON, just what you need
     title = models.CharField(max_length=255, blank=True)  # Human-readable title
     description = models.TextField(blank=True)  # Brief description

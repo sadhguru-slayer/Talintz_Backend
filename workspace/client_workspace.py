@@ -13,7 +13,7 @@ from core.models import Milestone, Notification, ProjectMilestoneNote
 from django.contrib.contenttypes.models import ContentType
 from OBSP.models import OBSPMilestone, OBSPLevel, OBSPAssignment, OBSPCriteria, OBSPAssignmentNote  # Import additional OBSP models
 from django.utils import timezone
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 import re
 from django.db import models
 from financeapp.models import Transaction
@@ -23,6 +23,8 @@ from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
 from workspace.models import WorkspaceActivity
 from django.contrib.contenttypes.fields import GenericForeignKey
+from core.models import Project
+from OBSP.models import OBSPResponse, OBSPAssignmentNote
 
 
 def get_workspace_payment_summary(workspace):
@@ -192,16 +194,15 @@ def client_overview(request, workspace_id):
         # Get assignment details
         assignment = obsp_response.get_active_assignment()
         if assignment:
-            assigned_at = assignment.assigned_at
-            # Calculate deadline based on assignment date + duration
+            assigned_at = assignment.assigned_at  # Ensure this is a datetime
             try:
                 duration_days = int(duration.split('-')[1].split()[0]) if '-' in duration else 14
-                deadline = assigned_at + timezone.timedelta(days=duration_days)
+                deadline = assigned_at + timezone.timedelta(days=duration_days)  # This should be a datetime
             except:
-                deadline = assigned_at + timezone.timedelta(days=14)
+                deadline = assigned_at + timezone.timedelta(days=14)  # Fallback
         else:
             assigned_at = None
-            deadline = None
+            deadline = None  # Explicitly set to None
 
         # Get skills from OBSP criteria
         try:
@@ -222,22 +223,12 @@ def client_overview(request, workspace_id):
         milestone_progress = obsp_response.milestone_progress or {}
 
         milestones = []
-        current_date = assigned_at if assigned_at else timezone.now()
         
         for milestone in level_milestones:
-            # Calculate deadline based on order and estimated days
-            if milestone.order == 1:
-                # First milestone starts from assignment date
-                milestone_deadline = current_date + timezone.timedelta(days=milestone.estimated_days)
-            else:
-                # Subsequent milestones start from previous milestone deadline
-                previous_milestone = level_milestones.filter(order=milestone.order - 1).first()
-                if previous_milestone:
-                    # This is simplified - in reality you'd track actual completion dates
-                    milestone_deadline = current_date + timezone.timedelta(days=milestone.estimated_days)
-                else:
-                    milestone_deadline = current_date + timezone.timedelta(days=milestone.estimated_days)
-
+            milestone_id_str = str(milestone.id)
+            status = milestone_progress.get(milestone_id_str, {}).get('status', milestone.status)  # Fetch status from progress
+            deadline = milestone_progress.get(milestone_id_str, {}).get('deadline', None)  # Fetch deadline from progress (as string)
+            
             # Get activities related to this OBSP milestone
             milestone_activities = workspace.activities.filter(
                 obsp_milestone=milestone
@@ -269,27 +260,26 @@ def client_overview(request, workspace_id):
                     }
                 
                 activities.append(activity_data)
-            milestone_id_str = str(milestone.id)
-            status = milestone_progress.get(milestone_id_str, milestone.status)  # fallback to model status if not set
+            
             milestones.append({
                 "id": milestone.id,
                 "title": milestone.title,
                 "description": milestone.description,
                 "milestone_type": milestone.milestone_type,
                 "estimated_days": milestone.estimated_days,
-                "deadline": milestone_deadline.isoformat() if milestone_deadline else None,
+                "deadline": deadline,  # Use the string directly, no .isoformat()
                 "payout_percentage": float(milestone.payout_percentage),
                 "deliverables": milestone.deliverables,
-                "status": status,
+                "status": status,  # Fetched from milestone_progress
                 "order": milestone.order,
-                "activities": activities,  # Add milestone-specific activities
+                "activities": activities,
                 "activity_count": len(activities),
             })
 
         project_details = {
             "title": obsp_level.name,  # Use level name instead of template title
             "description": template.description,
-            "start_date": assigned_at.isoformat() if assigned_at else None,
+            "start_date": assigned_at.isoformat() if assigned_at and isinstance(assigned_at, (datetime, date)) else assigned_at,
             "complexity_level": selected_level,
             "category_name": template.category.name if template.category else None,
             "skills_required": {
@@ -298,7 +288,7 @@ def client_overview(request, workspace_id):
                 "required_skills": required_skills,
             },
             "budget": float(obsp_response.total_price) if obsp_response.total_price else 0,
-            "deadline": deadline.isoformat() if deadline else None,
+            "deadline": deadline.isoformat() if deadline and isinstance(deadline, (datetime, date)) else deadline,  # Safe check
             "features": features,
             "deliverables": deliverables,
         }
@@ -509,20 +499,6 @@ def client_milestones(request, workspace_id):
             deadline = None
             milestone_activities = [a for a in activities if a.obsp_milestone_id == m.id]
         
-            if current_date:
-                if m.order == milestones_qs.aggregate(models.Min('order'))['order__min']:
-                    # First milestone: start from assignment date
-                    deadline = current_date + timedelta(days=m.estimated_days)
-                else:
-                    # Subsequent milestones: start from previous milestone's deadline
-                    if milestones:  # If we have previous milestones
-                        previous_deadline = milestones[-1]['deadline']
-                        if previous_deadline:
-                            deadline = previous_deadline + timedelta(days=m.estimated_days)
-                    else:
-                        # Fallback: start from assignment date
-                        deadline = current_date + timedelta(days=m.estimated_days)
-            
             # Get all related notes for this milestone
             feedbacks = []
             for note in obsp_response.notes.filter(note_type='client_feedback', milestone=m):
@@ -602,7 +578,8 @@ def client_milestones(request, workspace_id):
             ]
             
             milestone_id_str = str(m.id)
-            status = milestone_progress.get(milestone_id_str, m.status)  # fallback to model status if not set
+            status = milestone_progress.get(milestone_id_str, {}).get('status', m.status)  # Fetch status from progress
+            deadline = milestone_progress.get(milestone_id_str, {}).get('deadline', None)  # Fetch deadline from progress (as string)
             
             milestone_data = {
                 "id": m.id,
@@ -1120,5 +1097,87 @@ class BoxActionAPIView(APIView):
             return Response({"error": str(e)}, status=500) 
         
 
-
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def accept_milestone(request, workspace_id, milestone_id):
+    user = request.user  # Assuming authentication is handled via middleware
+    
+    try:
+        # 1. Fetch the workspace and verify user access
+        workspace = Workspace.objects.get(id=workspace_id, participants__user=user, participants__role='client')
+        content_object = workspace.content_object  # This could be Project or OBSPResponse
         
+        # 2. Fetch feedback from the request body
+        feedback = request.data.get('data').get('feedback', '').strip()  # Expecting JSON body with 'feedback' key
+        
+        if isinstance(content_object, Project):  # For Projects
+            milestone = Milestone.objects.get(id=milestone_id, project=content_object)
+            milestone.status = 'completed'  # Update status
+            milestone.completed_at = timezone.now()  # Set completion time
+            milestone.save()
+            
+            # Handle feedback
+            if feedback:
+                ProjectMilestoneNote.objects.create(
+                    milestone=milestone,
+                    created_by=user,
+                    note_type='client_feedback',
+                    content=feedback,
+                    is_aknowledged=False  # Can be updated later
+                )
+            
+            # New logic: Check for the next milestone and update if pending
+            next_milestones = Milestone.objects.filter(project=content_object, id__gt=milestone.id).order_by('id').first()
+            if next_milestones and next_milestones.status == 'pending':
+                next_milestones.status = 'in_progress'
+                next_milestones.save()  # Optionally, add a timestamp or other fields here
+            
+        elif isinstance(content_object, OBSPResponse):  # For OBSP
+            milestone_progress = content_object.milestone_progress  # JSON field, e.g., {"1": "in_progress"}
+            
+            # Ensure milestone_id is a string key in milestone_progress
+            milestone_key = str(milestone_id)  # Assuming keys are strings like "1"
+            if milestone_key in milestone_progress:
+                milestone_progress[milestone_key] = 'completed'  # Update status
+                content_object.milestone_progress = milestone_progress
+                content_object.save()
+                
+                # Handle feedback
+                if feedback:
+                    OBSPAssignmentNote.objects.create(
+                        response=content_object,
+                        milestone=OBSPMilestone.objects.get(id=milestone_id),  # Link to the specific milestone
+                        created_by=user,
+                        note_type='client_feedback',
+                        content=feedback,
+                        is_aknowledged=False
+                    )
+                
+                # New logic: Check for the next milestone in the dictionary and update if pending
+                keys = sorted(milestone_progress.keys())  # Sort keys to determine sequence (e.g., ["1", "2", "3"])
+                current_index = keys.index(milestone_key) if milestone_key in keys else -1
+                if current_index != -1 and current_index + 1 < len(keys):
+                    next_key = keys[current_index + 1]  # Get the next key
+                    if milestone_progress.get(next_key) == 'pending':
+                        milestone_progress[next_key] = 'in_progress'
+                        content_object.milestone_progress = milestone_progress
+                        content_object.save()
+            else:
+                return Response({"error": "Milestone not found in progress tracking."}, status=404)
+        
+        return Response({"success": True, "message": "Milestone accepted successfully."}, status=200)
+    
+    except Workspace.DoesNotExist:
+        return Response({"error": "Workspace not found or access denied."}, status=404)
+    except Milestone.DoesNotExist:
+        return Response({"error": "Milestone not found."}, status=404)
+    except OBSPMilestone.DoesNotExist:
+        return Response({"error": "OBSP Milestone not found."}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+def raise_dispute(request, workspace_id, milestone_id):
+    pass
+
+def extend_milestone_deadline(request, workspace_id, milestone_id):
+    pass

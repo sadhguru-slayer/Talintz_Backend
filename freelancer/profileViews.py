@@ -356,7 +356,7 @@ class ProfessionalInfoUpdateView(APIView):
                     profile.skills.add(skill)
             
             profile.save()
-            
+        
             return Response({
                 "message": "Professional information updated successfully",
                 "status": "success"

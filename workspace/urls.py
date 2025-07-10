@@ -31,4 +31,8 @@ urlpatterns = [
     path('client/notifications/<int:workspace_id>/', views.WorkspaceNotificationsAPIView.as_view(), name='client_workspace_notifications'),
     path('client/notifications/<int:workspace_id>/<int:notification_id>/read/', views.mark_notification_read, name='client_notification_mark_read'),
     path('client/box/<int:box_id>/<str:action>/', client_workspace.BoxActionAPIView.as_view(), name='client_box_action'),
+    # Accept milestone, raise dispute, Extend milestone deadline urls
+    path('client/workspace/<int:workspace_id>/milestone/<int:milestone_id>/accept/', client_workspace.accept_milestone, name='accept_milestone'),
+    path('client/workspace/<int:workspace_id>/milestone/<int:milestone_id>/raise-dispute/', client_workspace.raise_dispute, name='raise_dispute'),
+    path('client/workspace/<int:workspace_id>/milestone/<int:milestone_id>/extend-deadline/', client_workspace.extend_milestone_deadline, name='extend_milestone_deadline'),
 ]

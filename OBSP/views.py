@@ -15,6 +15,8 @@ from django.db import models
 from financeapp.models.wallet import Wallet
 from django.db import transaction
 from decimal import Decimal
+from freelancer.models import FreelancerOBSPEligibility
+from core.models import User
 
 # Create your views here.
 
@@ -570,7 +572,7 @@ def submit_obsp_response(request, obsp_id):
                     'error': f'An unexpected error occurred: {str(e)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Create or update response based on existing draft
+        # After creating or updating the response
         if existing_draft:
             # Update existing draft response
             existing_draft.responses = detailed_responses
@@ -607,6 +609,20 @@ def submit_obsp_response(request, obsp_id):
                 status=response_status
             )
         
+        # New logic: Check for eligible freelancers
+        if selected_level:  # Ensure selected_level is defined
+            eligible_freelancers = FreelancerOBSPEligibility.objects.filter(
+                obsp_template=obsp,  # Match the OBSP template
+                eligibility_data__has_key=selected_level  # Ensure the level exists in eligibility_data
+            ).filter(  # Dynamically filter for is_eligible
+                **{f'eligibility_data__{selected_level}__is_eligible': True}
+            ).values('freelancer__id', 'freelancer__username')  # Get freelancer IDs and usernames
+            
+            eligible_list = list(eligible_freelancers)  # Convert queryset to list for response
+        else:
+            eligible_list = []  # Default to empty list if selected_level is not set
+        
+        print(eligible_list)
         return Response({
             'success': True,
             'data': {
@@ -615,7 +631,8 @@ def submit_obsp_response(request, obsp_id):
                 'status': response.status,
                 'detailed_response': detailed_responses,
                 'wallet_payment_processed': wallet_payment,
-                'updated_existing_draft': existing_draft is not None
+                'updated_existing_draft': existing_draft is not None,
+                'eligible_freelancers': eligible_list,  # Include the list of eligible freelancers
             }
         })
         
@@ -629,6 +646,7 @@ def submit_obsp_response(request, obsp_id):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

@@ -65,13 +65,13 @@ def update_obsp_eligibility_on_project_assignment(sender, instance, action, pk_s
                                         freelancer, obsp_template, level
                                     )
                                     eligibility_obj.set_level_eligibility(level, is_eligible, overall_score, analysis)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                print(f"Error in eligibility calculation for template {obsp_template.title}: {str(e)}")
                         OBSPEligibilityManager.update_freelancer_cache(freelancer)
     finally:
         if hasattr(_thread_local, 'updating_eligibility'):
             delattr(_thread_local, 'updating_eligibility')
-
+    
 @receiver(post_save, sender=Project)
 def update_obsp_eligibility_on_project_status_change(sender, instance, created, **kwargs):
     """
@@ -91,6 +91,7 @@ def update_obsp_eligibility_on_project_status_change(sender, instance, created, 
             for freelancer in assigned_freelancers:
                 from OBSP.models import OBSPTemplate
                 obsp_templates = OBSPTemplate.objects.filter(is_active=True)
+                
                 for obsp_template in obsp_templates:
                     try:
                         from freelancer.models import FreelancerOBSPEligibility
@@ -104,13 +105,14 @@ def update_obsp_eligibility_on_project_status_change(sender, instance, created, 
                                 freelancer, obsp_template, level
                             )
                             eligibility_obj.set_level_eligibility(level, is_eligible, overall_score, analysis)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"Error in eligibility calculation for template {obsp_template.title}: {str(e)}")
                 OBSPEligibilityManager.update_freelancer_cache(freelancer)
+                
     finally:
         if hasattr(_thread_local, 'updating_eligibility'):
             delattr(_thread_local, 'updating_eligibility')
-
+            
 @receiver(post_save, sender=Feedback)
 def update_obsp_eligibility_on_feedback_change(sender, instance, created, **kwargs):
     """Update OBSP eligibility when feedback/rating is added"""

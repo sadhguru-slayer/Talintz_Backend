@@ -44,15 +44,32 @@ class OBSPEligibilityEvaluator:
         self.freelancer_profile = freelancer.freelancer_profile
         self.obsp_template = obsp_template
         self.level = level
-        self.criteria = OBSPCriteria.objects.get(
-            template=obsp_template,
-            level=level,
-            is_active=True
-        )
-        self.evaluation_result = {}
+        try:
+            self.criteria = OBSPCriteria.objects.get(
+                template=obsp_template,
+                level=level,
+                is_active=True
+            )
+            self.evaluation_result = {}
+        except OBSPCriteria.DoesNotExist:
+            self.criteria = None
+            self.evaluation_result = {
+                'is_eligible': False,
+                'overall_score': 0,
+                'detailed_breakdown': {},
+                'reasons': [f"No active OBSPCriteria found for template '{obsp_template.title}' and level '{level}'."],
+                'proof': {},
+                'level': level,
+                'obsp_template': obsp_template.title,
+                'evaluated_at': timezone.now().isoformat(),
+                'error': f"No active OBSPCriteria found for template '{obsp_template.title}' and level '{level}'."
+            }
     
     def evaluate_eligibility(self):
         """Main evaluation method"""
+        if not hasattr(self, 'criteria') or self.criteria is None:
+            return self.evaluation_result  # Ensure early return
+
         try:
             self.evaluation_result = {
                 'is_eligible': False,
@@ -122,14 +139,19 @@ class OBSPEligibilityEvaluator:
         except Exception as e:
             self.evaluation_result.update({
                 'error': str(e),
-                'is_eligible': False
+                'is_eligible': False,
+                'overall_score': 0,
+                'reasons': [f"Unexpected error in eligibility calculation: {str(e)}"]
             })
             return self.evaluation_result
     
     def _evaluate_project_experience(self):
         """Evaluate project experience criteria"""
+        if not self.criteria:
+            self.evaluation_result['reasons'].append("No criteria available for evaluation.")
+            return 0
         try:
-            required_domains = self.criteria.required_domains
+            required_domains = list(self.criteria.required_domains.values_list('name', flat=True))
             min_completed_projects = self.criteria.min_completed_projects
             min_project_budget = self.criteria.min_project_budget
             min_project_duration = self.criteria.min_project_duration_days
@@ -139,12 +161,12 @@ class OBSPEligibilityEvaluator:
             ).filter(
                 status__in=['completed', 'Completed']
             )
+
             
             if required_domains:
                 completed_projects = completed_projects.filter(
                     domain__name__in=required_domains
                 )
-            
             if min_project_budget > 0:
                 completed_projects = completed_projects.filter(
                     budget__gte=min_project_budget
@@ -192,10 +214,13 @@ class OBSPEligibilityEvaluator:
     
     def _evaluate_skill_match(self):
         """Evaluate skill match criteria including skills from completed projects"""
+        if not self.criteria:
+            self.evaluation_result['reasons'].append("No criteria available for evaluation.")
+            return 0
         try:
-            required_skills = self.criteria.required_skills
-            core_skills = self.criteria.core_skills
-            optional_skills = self.criteria.optional_skills
+            required_skills = list(self.criteria.required_skills.values_list('name', flat=True))
+            core_skills = list(self.criteria.core_skills.values_list('name', flat=True))
+            optional_skills = list(self.criteria.optional_skills.values_list('name', flat=True))
             min_skill_match_percentage = self.criteria.min_skill_match_percentage
             
             profile_skills = set(self.freelancer_profile.skills.values_list('name', flat=True))
@@ -281,52 +306,44 @@ class OBSPEligibilityEvaluator:
     
     def _evaluate_rating(self):
         """Evaluate rating criteria using Feedback model"""
+        if not self.criteria:
+            self.evaluation_result['reasons'].append("No criteria available for evaluation.")
+            return 0
         try:
             min_avg_rating = self.criteria.min_avg_rating
             
-            feedback_ratings = Feedback.objects.filter(
-                to_user=self.freelancer,
-                is_reply=False
-            ).values_list('rating', flat=True)
-            
-            review_ratings = FreelancerReview.objects.filter(
-                to_freelancer=self.freelancer
-            ).values_list('rating', flat=True)
-            
-            all_ratings = list(feedback_ratings) + list(review_ratings)
-            
-            if all_ratings:
-                avg_rating = sum(all_ratings) / len(all_ratings)
+            feedback_ratings = FreelancerProfile.objects.get(user=self.freelancer).average_rating
+            total_ratings = Feedback.objects.filter(to_user=self.freelancer).count()
+            if feedback_ratings:
+                avg_rating = feedback_ratings  # avg_rating is likely a Decimal
+                # Convert to float before calculations to avoid Decimal * float errors
+                score = min(100, (float(avg_rating) / 5) * 100)  # Explicit float conversion
                 if avg_rating >= min_avg_rating:
-                    score = min(100, (avg_rating / 5) * 100)
-                    self.evaluation_result['reasons'].append(
-                        f"✅ Meets rating requirement: {avg_rating:.2f} average rating"
-                    )
+                    self.evaluation_result['rating_score'] = score  # Assuming you track this
                 else:
-                    score = (avg_rating / min_avg_rating) * 100
-                    self.evaluation_result['reasons'].append(
-                        f"❌ Insufficient rating: {avg_rating:.2f} (required: {min_avg_rating})"
-                    )
+                    self.evaluation_result['rating_score'] = 0
             else:
-                score = 0
-                self.evaluation_result['reasons'].append("❌ No ratings available")
+                self.evaluation_result['rating_score'] = 0
             
             self.evaluation_result['proof']['rating'] = {
-                'average_rating': avg_rating if all_ratings else 0,
-                'total_ratings': len(all_ratings),
-                'feedback_ratings': list(feedback_ratings),
-                'review_ratings': list(review_ratings),
+                'average_rating': float(avg_rating) if feedback_ratings else 0,  # Convert for consistency
+                'total_ratings': total_ratings,
+                'feedback_ratings': feedback_ratings,
+                'review_ratings': 0,
                 'min_required': min_avg_rating
             }
             
             return round(score, 2)
             
         except Exception as e:
-            self.evaluation_result['reasons'].append(f"Error evaluating rating: {str(e)}")
+            self.evaluation_result['reasons'].append(f"Error in rating evaluation: {str(e)}")
             return 0
     
     def _evaluate_deadline_compliance(self):
         """Evaluate deadline compliance"""
+        if not self.criteria:
+            self.evaluation_result['reasons'].append("No criteria available for evaluation.")
+            return 0
         try:
             min_deadline_compliance = self.criteria.min_deadline_compliance
             
@@ -343,7 +360,7 @@ class OBSPEligibilityEvaluator:
                     if project.deadline:
                         on_time_projects += 1
                 
-                compliance_rate = (on_time_projects / total_projects) * 100
+                compliance_rate = (float(on_time_projects) / float(total_projects)) * 100  # Explicit float conversion
                 
                 if compliance_rate >= min_deadline_compliance:
                     score = min(100, compliance_rate)
@@ -351,7 +368,7 @@ class OBSPEligibilityEvaluator:
                         f"✅ Meets deadline compliance: {compliance_rate:.1f}%"
                     )
                 else:
-                    score = compliance_rate
+                    score = 0
                     self.evaluation_result['reasons'].append(
                         f"❌ Insufficient deadline compliance: {compliance_rate:.1f}% (required: {min_deadline_compliance}%)"
                     )
@@ -360,7 +377,7 @@ class OBSPEligibilityEvaluator:
                 self.evaluation_result['reasons'].append("❌ No completed projects for deadline evaluation")
             
             self.evaluation_result['proof']['deadline_compliance'] = {
-                'compliance_rate': compliance_rate if completed_projects.exists() else 0,
+                'compliance_rate': compliance_rate,
                 'on_time_projects': on_time_projects if completed_projects.exists() else 0,
                 'total_projects': total_projects if completed_projects.exists() else 0,
                 'min_required': min_deadline_compliance
@@ -369,11 +386,14 @@ class OBSPEligibilityEvaluator:
             return round(score, 2)
             
         except Exception as e:
-            self.evaluation_result['reasons'].append(f"Error evaluating deadline compliance: {str(e)}")
+            self.evaluation_result['reasons'].append(f"Error in deadline compliance: {str(e)}")
             return 0
     
     def _evaluate_obsp_experience(self):
         """Evaluate OBSP experience for higher levels"""
+        if not self.criteria:
+            self.evaluation_result['reasons'].append("No criteria available for evaluation.")
+            return 0
         try:
             min_obsp_completed = self.criteria.min_obsp_completed
     
@@ -414,6 +434,9 @@ class OBSPEligibilityEvaluator:
             return 0
     def _calculate_bonus_points(self):
         """Calculate bonus points from various criteria"""
+        if not self.criteria:
+            self.evaluation_result['reasons'].append("No criteria available for evaluation.")
+            return 0
         try:
             bonus_points = 0
             bonus_criteria = self.criteria.bonus_criteria
@@ -455,6 +478,9 @@ class OBSPEligibilityEvaluator:
     
     def _determine_eligibility(self, overall_score):
         """Determine final eligibility based on overall score and criteria"""
+        if not self.criteria:
+            self.evaluation_result['reasons'].append("No criteria available for eligibility determination.")
+            return False
         try:
             min_requirements_met = True
             
@@ -529,7 +555,8 @@ class OBSPEligibilityCalculator:
                 {
                     'error': str(e),
                     'is_eligible': False,
-                    'overall_score': 0
+                    'overall_score': 0,
+                    'reasons': [f"Unexpected error in eligibility calculation: {str(e)}"]
                 },
                 duration
             )

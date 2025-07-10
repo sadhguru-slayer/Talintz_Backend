@@ -117,18 +117,42 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [
     "https://talintzf.netlify.app",
     "https://talintz.com",
-    "https://www.talintz.com"  # Include www subdomain just in case
+    "https://www.talintz.com",
 ]
 
 if DEBUG:
-    CORS_ALLOWED_ORIGINS += [
+    local_origins = [
         "http://localhost:5173",
-        "http://127.0.0.1:5173"
+        "http://127.0.0.1:5173",
     ]
+    for origin in local_origins:
+        if origin not in CORS_ALLOWED_ORIGINS:
+            CORS_ALLOWED_ORIGINS.append(origin)
 
 CORS_ALLOW_CREDENTIALS = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+
+CORS_ALLOW_METHODS = [
+         'GET',
+         'POST',
+         'PUT',
+         'PATCH',
+         'DELETE',
+         'OPTIONS',  # OPTIONS is crucial for preflight requests
+     ]
+
+CORS_ALLOW_HEADERS = [
+         'accept',
+         'accept-encoding',
+         'authorization',
+         'content-type',
+         'dnt',
+         'origin',
+         'user-agent',
+         'x-csrftoken',
+         'x-requested-with',
+     ]
 
 CSRF_TRUSTED_ORIGINS = [
     'https://talintzbackend-production.up.railway.app',
