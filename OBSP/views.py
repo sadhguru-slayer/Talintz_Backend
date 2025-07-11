@@ -9,7 +9,8 @@ from .serializers import (
     OBSPTemplateSerializer, 
     OBSPTemplateDetailSerializer,
     OBSPLevelSerializer,
-    OBSPFieldSerializer
+    OBSPFieldSerializer,
+OBSPResponseSerializer
 )
 from django.db import models
 from financeapp.models.wallet import Wallet
@@ -17,8 +18,243 @@ from django.db import transaction
 from decimal import Decimal
 from freelancer.models import FreelancerOBSPEligibility
 from core.models import User
+import datetime
+from django.utils import timezone  # For timezone handling
+import datetime  # For date manipulations
+from OBSP.models import OBSPResponse, OBSPLevel, OBSPCriteria, OBSPMilestone  # Adjust based on your models
+from core.models import User  # If needed, based on your imports
+from workspace.models import Workspace  # Assuming this is where Workspace is defined, if relevant
+from django.contrib.contenttypes.models import ContentType # Added for generic foreign key check
+from OBSP.models import OBSPAssignment # Added for OBSPAssignment check
 
 # Create your views here.
+
+# Create a client purchased OBSPs means OBSPResponses
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def obsp_response_list(request):
+    """Get a list of OBSPResponses for the authenticated user with custom fields"""
+    try:
+        responses = OBSPResponse.objects.filter(client=request.user).order_by('-created_at')
+        
+        # Manually construct the response data
+        response_data = []
+        for response in responses:
+            # Fetch the OBSPLevel instance for the selected level
+            level_obj = OBSPLevel.objects.filter(
+                template=response.template,
+                level=response.selected_level
+            ).first()
+            
+            level_name = level_obj.name if level_obj and level_obj.name else response.get_selected_level_display() or 'Unknown'
+            milestone_count = OBSPMilestone.objects.filter(template = response.template,level=level_obj).count()
+            if response.milestone_progress:  # Ensure milestone_progress exists and is not empty
+                milestone_keys = sorted(response.milestone_progress.keys(), key=int)  # Sort keys as integers
+                if milestone_keys:  # Check if there are any keys
+                    last_key = milestone_keys[-1]  # Get the last key
+                    last_milestone_deadline = response.milestone_progress[last_key].get('deadline')  # Extract deadline
+                else:
+                    last_milestone_deadline = None  # Fallback if no milestones
+            else:
+                last_milestone_deadline = None  # Fallback if milestone_progress is empty
+            
+            data = {
+                'id': response.id,
+                'title': f"{response.template.title} - {level_name}" if response.template else 'Untitled',
+                'level': response.selected_level,
+                'features':level_obj.features,
+                'created_at':response.created_at,
+                'deadline':last_milestone_deadline,
+                'status': response.status,
+                'price': str(response.total_price) if response.total_price else '0.00',
+                'milestones_count': milestone_count if response.template and response.selected_level else 0,  # Filtered by selected level
+            }
+            response_data.append(data)
+        
+        return Response({
+            'success': True,
+            'data': response_data
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def obsp_response_detail(request, response_id):
+    """Get details of a specific OBSPResponse with custom processing from client_workspace"""
+    try:
+        obsp_response = get_object_or_404(OBSPResponse, id=response_id, client=request.user)
+        
+        # Check for OBSPAssignment
+        has_obsp_assignment = OBSPAssignment.objects.filter(obsp_response=obsp_response).exists()
+        
+        # Check for Workspace (assuming Workspace is linked to OBSPResponse via generic foreign key)
+        workspace_content_type = ContentType.objects.get_for_model(OBSPResponse)
+        has_workspace = Workspace.objects.filter(
+            content_type=workspace_content_type,
+            object_id=obsp_response.id
+        ).exists()
+        
+        # Set workspace_ready based on both conditions
+        workspace_ready = has_obsp_assignment and has_workspace
+        
+        # If workspace exists, fetch the first one (assuming one per OBSPResponse)
+        workspace_id = None
+        if has_workspace:
+            workspace = Workspace.objects.filter(
+                content_type=workspace_content_type,
+                object_id=obsp_response.id
+            ).first()
+            workspace_id = workspace.id  # This will be included in the response if workspace_ready is True
+        
+        template = obsp_response.template
+        selected_level = obsp_response.selected_level
+        
+        # Get OBSP level details
+        try:
+            obsp_level = OBSPLevel.objects.get(template=template, level=selected_level)
+            duration = obsp_level.duration
+            features = obsp_level.features
+            deliverables = obsp_level.deliverables
+        except OBSPLevel.DoesNotExist:
+            duration = "N/A"
+            features = []
+            deliverables = []
+
+        # Get assignment details
+        assignment = obsp_response.get_active_assignment()  # Assuming this method exists
+        if assignment:
+            assigned_at = assignment.assigned_at  # Ensure this is a datetime
+            try:
+                duration_days = int(duration.split('-')[1].split()[0]) if '-' in duration else 14
+                deadline = assigned_at + timezone.timedelta(days=duration_days)
+            except:
+                deadline = assigned_at + timezone.timedelta(days=14)  # Fallback
+        else:
+            assigned_at = None
+            deadline = None
+
+        # Get skills from OBSP criteria
+        try:
+            obsp_criteria = OBSPCriteria.objects.get(template=template, level=selected_level)
+            core_skills = obsp_criteria.core_skills
+            optional_skills = obsp_criteria.optional_skills
+            required_skills = obsp_criteria.required_skills
+        except OBSPCriteria.DoesNotExist:
+            core_skills = []
+            optional_skills = []
+            required_skills = []
+
+        # Get milestones for this level
+        level_milestones = OBSPMilestone.objects.filter(
+            template=template,
+            level=obsp_level
+        ).order_by('order')
+        milestone_progress = obsp_response.milestone_progress or {}
+
+        milestones = []
+        for milestone in level_milestones:
+            milestone_id_str = str(milestone.id)
+            status_value = milestone_progress.get(milestone_id_str, {})
+            status = status_value.get('status', milestone.status) if isinstance(status_value, dict) else milestone.status
+            deadline_milestone = status_value.get('deadline', None) if isinstance(status_value, dict) else None
+            
+            # Get activities (assuming this is from Workspace or related model)
+            # Adjust based on your actual model; this might need integration from workspace
+            milestone_activities = []  # Placeholder; replace with actual query if needed
+            # Example: milestone_activities = Workspace.objects.filter(obsp_milestone=milestone).select_related('user').order_by('-timestamp')[:20]
+            
+            milestones.append({
+                "id": milestone.id,
+                "title": milestone.title,
+                "description": milestone.description,
+                "milestone_type": milestone.milestone_type,
+                "estimated_days": milestone.estimated_days,
+                "deadline": deadline_milestone,
+                "payout_percentage": float(milestone.payout_percentage),
+                "deliverables": milestone.deliverables,
+                "status": status,
+                "order": milestone.order,
+                "activities": [],  # Populate if needed
+                "activity_count": 0,  # Or actual count
+            })
+
+        phases_data = obsp_response.responses.get('phases', {})
+        client_selections = {}
+        summary = {
+            'total_price': float(obsp_response.total_price) if obsp_response.total_price else 0,
+            'selected_level': selected_level,
+            'phase_count': len(phases_data),
+            'key_selections': [],
+        }
+
+        for phase_key, phase in phases_data.items():
+            selections = phase.get('selections', [])
+            unique_selections = {}
+            for sel in selections:
+                if sel.get('field_label') not in unique_selections:
+                    unique_selections[sel.get('field_label')] = sel
+            
+            client_selections[phase_key] = {
+                'phase_display': phase.get('phase_display', phase_key),
+                'selected_fields': [
+                    {
+                        'field_label': sel.get('field_label'),
+                        'selected_value': sel.get('selected_value'),
+                        'price_impact': sel.get('price_impact', 0),
+                    } for sel in unique_selections.values() if sel.get('selected_value')
+                ],
+            }
+            
+            key_selections_for_phase = []
+            for sel in selections:
+                if sel.get('is_required', False):
+                    key_selections_for_phase.append({
+                        'field_label': sel.get('field_label'),
+                        'selected_value': sel.get('selected_value'),
+                    })
+            summary['key_selections'].extend(key_selections_for_phase)
+
+        project_details = {
+            "title": obsp_level.name,
+            "status":obsp_response.status,
+            "description": template.description,
+            "start_date": assigned_at.isoformat() if assigned_at and isinstance(assigned_at, (datetime.datetime, datetime.date)) else assigned_at,
+            "complexity_level": selected_level,
+            "category_name": template.category.name if template.category else None,
+            "skills_required": {
+                "core_skills": [skill.name for skill in (core_skills.all() if hasattr(core_skills, 'all') else core_skills)],
+                "optional_skills": [skill.name for skill in (optional_skills.all() if hasattr(optional_skills, 'all') else optional_skills)],
+                "required_skills": [skill.name for skill in (required_skills.all() if hasattr(required_skills, 'all') else required_skills)],
+            },
+            "budget": float(obsp_response.total_price) if obsp_response.total_price else 0,
+            "deadline": deadline.isoformat() if deadline and isinstance(deadline, (datetime.datetime, datetime.date)) else deadline,
+            "features": features,
+            "deliverables": deliverables,
+            "client_selections": client_selections,
+            "milestones": milestones,  # Include milestones
+            "summary": summary,  # Include the summary
+            "workspace_ready": workspace_ready,  # Add the new field here
+            "workspace_id": workspace_id if workspace_ready else None,  # New field, only if workspace_ready is True
+        }
+        
+        return Response({
+            'success': True,
+            'data': project_details  # Return the fully constructed project_details
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @staff_member_required
 def obsp_preview(request, obsp_id):
@@ -230,7 +466,7 @@ def obsp_fields(request, obsp_id, level=None):
         obsp = get_object_or_404(OBSPTemplate, id=obsp_id, is_active=True)
         
         # Get fields that are visible for the specified level
-        fields = obsp.fields.filter(is_active=True).order_by('phase', 'order')
+        fields = obsp.fields.filter(is_active=True).order_by('phase', 'order')  # Already ordered by phase and order
         if level:
             # Filter fields based on level visibility
             fields = fields.filter(
@@ -255,7 +491,7 @@ def obsp_fields(request, obsp_id, level=None):
                 phases[phase] = {
                     'phase': phase,
                     'phase_display': field.get_phase_display_name(),
-                    'phase_description': f'Configure your {field.get_phase_display_name().lower()}',
+                    'phase_description': field.get_phase_description(),
                     'fields': [],
                     'draft_data': None
                 }
@@ -274,23 +510,17 @@ def obsp_fields(request, obsp_id, level=None):
             }
             phases[phase]['fields'].append(field_data)
         
-        
         # Add draft data to each phase if exists
         if draft_response:
-            # Get the responses from the draft
             draft_responses_data = draft_response.responses or {}
-            
             for phase_key, phase_data in phases.items():
-                # Extract phase-specific responses from the draft
                 phase_responses = {}
                 phase_impacts = {}
                 
-                # Look for phase data in the detailed responses structure
                 if 'phases' in draft_responses_data:
                     phase_info = draft_responses_data['phases'].get(phase_key, {})
                     selections = phase_info.get('selections', [])
                     
-                    # Extract field responses from selections
                     for selection in selections:
                         field_id = selection.get('field_id')
                         selected_value = selection.get('selected_value')
@@ -301,25 +531,28 @@ def obsp_fields(request, obsp_id, level=None):
                             if price_impact > 0:
                                 phase_impacts[field_id] = price_impact
                 
-                # Calculate total phase impact
                 total_phase_impact = sum(phase_impacts.values())
-                
                 phases[phase_key]['draft_data'] = {
                     'has_draft': True,
                     'draft_id': draft_response.id,
                     'draft_price': draft_response.total_price,
-                    'created_at': draft_response.created_at.isoformat(),
                     'responses': phase_responses,
                     'phaseImpacts': {phase_key: total_phase_impact}
                 }
         
-
-        phases_list = list(phases.values())
+        # Define the desired phase order
+        DESIRED_PHASE_ORDER = ['basic', 'core_features', 'add_ons']  # Only these three phases
+        
+        # Sort phases based on DESIRED_PHASE_ORDER
+        sorted_phases = {phase: phases[phase] for phase in DESIRED_PHASE_ORDER if phase in phases}
+        
+        # Convert to list in the desired order
+        phases_list = [sorted_phases[phase] for phase in DESIRED_PHASE_ORDER if phase in sorted_phases]
         
         return Response({
             'success': True,
             'data': {
-                'phases': phases_list,
+                'phases': phases_list,  # Now in the correct order
                 'has_draft': draft_response is not None,
                 'draft_id': draft_response.id if draft_response else None,
                 'draft_price': draft_response.total_price if draft_response else None
@@ -331,6 +564,7 @@ def obsp_fields(request, obsp_id, level=None):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -417,15 +651,15 @@ def submit_obsp_response(request, obsp_id):
             phase_responses = phase_info.get('responses', {})
             phase_impacts = phase_info.get('phaseImpacts', {})
             
-            # Get phase display info
+            # Find phase display info
             phase_display = "Unknown Phase"
             phase_description = ""
             
-            # Find phase info from fields
-            phase_fields = obsp.fields.filter(phase=phase_key, is_active=True).first()
-            if phase_fields:
-                phase_display = phase_fields.get_phase_display_name()
-                phase_description = phase_fields.get_phase_description()
+            # Get fields for this specific phase
+            phase_fields_query = obsp.fields.filter(phase=phase_key, is_active=True)
+            if phase_fields_query.exists():
+                phase_display = phase_fields_query.first().get_phase_display_name()
+                phase_description = phase_fields_query.first().get_phase_description()
             
             phase_detail = {
                 'phase_key': phase_key,
@@ -436,94 +670,92 @@ def submit_obsp_response(request, obsp_id):
                 'has_selections': len(phase_responses) > 0
             }
             
-            # Process each field response in this phase
+            
+            # Process each field response in this phase, but only if it belongs to this phase
+            unique_fields = {}  # Use a dict to ensure uniqueness by field_id
             for field_id, field_value in phase_responses.items():
                 try:
                     field = obsp.fields.get(id=field_id, is_active=True)
                     
-                    field_detail = {
-                        'field_id': field_id,
-                        'field_label': field.label,
-                        'field_type': field.field_type,
-                        'field_help_text': field.help_text,
-                        'is_required': field.is_required,
-                        'has_price_impact': field.has_price_impact,
-                        'selected_value': field_value,
-                        'price_impact': 0,
-                        'options_detail': []
-                    }
-                    
-                    # Handle different field types and their pricing
-                    if field.field_type in ['radio', 'select']:
-                        # Single selection
-                        if field.options and isinstance(field_value, str):
-                            for option in field.options:
-                                if isinstance(option, dict):
-                                    if option.get('text') == field_value:
-                                        field_detail['selected_value'] = option.get('text', field_value)
-                                        field_detail['price_impact'] = float(option.get('price', 0))
+                    # Add check: Only include if the field's phase matches the current phase_key
+                    if field.phase == phase_key:
+                        field_detail = {
+                            'field_id': field_id,
+                            'field_label': field.label,
+                            'field_type': field.field_type,
+                            'field_help_text': field.help_text,
+                            'is_required': field.is_required,
+                            'has_price_impact': field.has_price_impact,
+                            'selected_value': field_value,
+                            'price_impact': 0,
+                            'options_detail': []
+                        }
+                        
+                        # Handle different field types and their pricing
+                        if field.field_type in ['radio', 'select']:
+                            if field.options and isinstance(field_value, str):
+                                for option in field.options:
+                                    if isinstance(option, dict):
+                                        if option.get('text') == field_value:
+                                            field_detail['selected_value'] = option.get('text', field_value)
+                                            field_detail['price_impact'] = float(option.get('price', 0))
+                                            field_detail['options_detail'] = [{
+                                                'text': option.get('text', ''),
+                                                'description': option.get('description', ''),
+                                                'price': float(option.get('price', 0)),
+                                                'selected': True
+                                            }]
+                                            break
+                                    elif option == field_value:
                                         field_detail['options_detail'] = [{
-                                            'text': option.get('text', ''),
-                                            'description': option.get('description', ''),
-                                            'price': float(option.get('price', 0)),
+                                            'text': option,
+                                            'description': '',
+                                            'price': 0,
                                             'selected': True
                                         }]
                                         break
-                                elif option == field_value:
-                                    field_detail['options_detail'] = [{
-                                        'text': option,
-                                        'description': '',
-                                        'price': 0,
-                                        'selected': True
-                                    }]
-                                    break
-                    
-                    elif field.field_type == 'checkbox':
-                        # Multiple selections
-                        if field.options and isinstance(field_value, list):
-                            selected_options = []
-                            total_field_impact = 0
-                            
-                            for option in field.options:
-                                if isinstance(option, dict):
-                                    is_selected = option.get('text') in field_value
-                                    option_detail = {
-                                        'text': option.get('text', ''),
-                                        'description': option.get('description', ''),
-                                        'price': float(option.get('price', 0)),
-                                        'selected': is_selected
-                                    }
-                                    selected_options.append(option_detail)
-                                    if is_selected:
-                                        total_field_impact += float(option.get('price', 0))
-                                else:
-                                    is_selected = option in field_value
-                                    selected_options.append({
-                                        'text': option,
-                                        'description': '',
-                                        'price': 0,
-                                        'selected': is_selected
-                                    })
-                            
-                            field_detail['options_detail'] = selected_options
-                            field_detail['price_impact'] = total_field_impact
-                    
-                    else:
-                        # Text, textarea, number, email, phone, date, file
-                        field_detail['price_impact'] = float(field.price_impact) if field.has_price_impact else 0
-                    
-                    phase_detail['selections'].append(field_detail)
-                    
+                        
+                        elif field.field_type == 'checkbox':
+                            if field.options and isinstance(field_value, list):
+                                selected_options = []
+                                total_field_impact = 0
+                                
+                                for option in field.options:
+                                    if isinstance(option, dict):
+                                        is_selected = option.get('text') in field_value
+                                        option_detail = {
+                                            'text': option.get('text', ''),
+                                            'description': option.get('description', ''),
+                                            'price': float(option.get('price', 0)),
+                                            'selected': is_selected
+                                        }
+                                        selected_options.append(option_detail)
+                                        if is_selected:
+                                            total_field_impact += float(option.get('price', 0))
+                                    else:
+                                        is_selected = option in field_value
+                                        selected_options.append({
+                                            'text': option,
+                                            'description': '',
+                                            'price': 0,
+                                            'selected': is_selected
+                                        })
+                                
+                                field_detail['options_detail'] = selected_options
+                                field_detail['price_impact'] = total_field_impact
+                        
+                        else:
+                            field_detail['price_impact'] = float(field.price_impact) if field.has_price_impact else 0
+                        
+                        # Add to unique fields to prevent duplicates in this phase
+                        unique_fields[field_id] = field_detail  # Use field_id as key for uniqueness
+                        
+                        
                 except OBSPField.DoesNotExist:
-                    # Field not found, add basic info
-                    phase_detail['selections'].append({
-                        'field_id': field_id,
-                        'field_label': f"Field {field_id}",
-                        'field_type': 'unknown',
-                        'selected_value': field_value,
-                        'price_impact': 0,
-                        'options_detail': []
-                    })
+                    print(f"Field {field_id} not found for phase {phase_key}")
+            
+            # Now add the unique fields to phase_detail
+            phase_detail['selections'] = [detail for field_id, detail in unique_fields.items()]
             
             # Add phase to detailed responses
             detailed_responses['phases'][phase_key] = phase_detail
@@ -622,7 +854,6 @@ def submit_obsp_response(request, obsp_id):
         else:
             eligible_list = []  # Default to empty list if selected_level is not set
         
-        print(eligible_list)
         return Response({
             'success': True,
             'data': {
@@ -933,3 +1164,5 @@ def get_obsp_assignments(request, response_id):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+

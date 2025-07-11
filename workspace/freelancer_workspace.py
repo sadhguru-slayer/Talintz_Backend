@@ -23,8 +23,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 @permission_classes([IsAuthenticated])
 def freelancer_overview(request, workspace_id):
     user = request.user
-    print(f"User: {user.username}, Workspace ID: {workspace_id}")  # Debug log
-
+    
     # 1. Get the workspace where the user is a freelancer participant
     try:
         workspace = Workspace.objects.get(
@@ -37,7 +36,6 @@ def freelancer_overview(request, workspace_id):
 
     # 2. Get the content object (Project or OBSPResponse)
     content_object = workspace.content_object
-    print(f"Content object: {content_object}")  # Debug log
 
     # 3. Get participants
     participants = []
@@ -140,7 +138,10 @@ def freelancer_overview(request, workspace_id):
             "start_date": content_object.start_date.isoformat() if content_object.start_date else None,
             "complexity_level": content_object.complexity_level,
             "category_name": content_object.domain.name if content_object.domain else None,
-            "skills_required": [skill.name for skill in content_object.skills_required.all()],
+            
+            "skills_required": {
+                "required_skills": [skill.name for skill in content_object.skills_required.all()],
+            },
             "budget": float(content_object.budget) if content_object.budget else 0,
             "deadline": content_object.deadline.isoformat() if content_object.deadline else None,
         }
@@ -259,21 +260,66 @@ def freelancer_overview(request, workspace_id):
                 "activity_count": len(activities),
             })
 
+        # Process phases for simplified selections and summary
+        phases_data = obsp_response.responses.get('phases', {})  # Get the phases dictionary
+        client_selections = {}  # New structure for simplified data
+        summary = {  # Build a simple summary
+            'total_price': float(obsp_response.total_price) if obsp_response.total_price else 0,
+            'selected_level': selected_level,
+            'phase_count': len(phases_data),
+            'key_selections': [],  # List of key selected items across phases
+        }
+
+        for phase_key, phase in phases_data.items():
+            selections = phase.get('selections', [])  # List of selected fields
+            print(f"Processing phase: {phase_key}, selections count: {len(selections)}")  # Debugging log
+            
+            # Ensure selections are unique by field_label to prevent duplicates
+            unique_selections = {}
+            for sel in selections:
+                if sel.get('field_label') not in unique_selections:  # Only add if not already present
+                    unique_selections[sel.get('field_label')] = sel
+            
+            client_selections[phase_key] = {
+                'phase_display': phase.get('phase_display', phase_key),
+                'selected_fields': [  # Simplified list of selected fields, now from unique selections
+                    {
+                        'field_label': sel.get('field_label'),
+                        'selected_value': sel.get('selected_value'),
+                        'price_impact': sel.get('price_impact', 0),
+                    } for sel in unique_selections.values() if sel.get('selected_value')
+                ],
+            }
+            
+            # Add key selections to summary, but only for the current phase
+            key_selections_for_phase = []  # Temporary list per phase
+            for sel in selections:
+                if sel.get('is_required', False):
+                    key_selections_for_phase.append({
+                        'field_label': sel.get('field_label'),
+                        'selected_value': sel.get('selected_value'),
+                    })
+            summary['key_selections'].extend(key_selections_for_phase)  # Append only after processing phase
+            
+            print(f"Phase {phase_key} final selected_fields count: {len(client_selections[phase_key]['selected_fields'])}")  # Debugging log
+
         project_details = {
-            "title": obsp_level.name,  # Use level name instead of template title
+            "title": obsp_level.name,
             "description": template.description,
             "start_date": assigned_at.isoformat() if assigned_at else None,
             "complexity_level": selected_level,
             "category_name": template.category.name if template.category else None,
             "skills_required": {
-                "core_skills": core_skills,
-                "optional_skills": optional_skills,
-                "required_skills": required_skills,
+                "core_skills": [skill.name for skill in (core_skills.all() if hasattr(core_skills, 'all') else core_skills)],
+                "optional_skills": [skill.name for skill in (optional_skills.all() if hasattr(optional_skills, 'all') else optional_skills)],
+                "required_skills": [skill.name for skill in (required_skills.all() if hasattr(required_skills, 'all') else required_skills)],
             },
             "budget": float(obsp_response.total_price) if obsp_response.total_price else 0,
             "deadline": deadline.isoformat() if deadline else None,
             "features": features,
             "deliverables": deliverables,
+            "client_selections": client_selections,  # New simplified structure
+            "summary": summary,  # High-level summary
         }
 
     # 7. Get workspace activity history (general activities)
@@ -334,7 +380,6 @@ def freelancer_overview(request, workspace_id):
         }
     }
 
-    print(data)
     return Response(data)
 
 
@@ -351,8 +396,7 @@ def serialize_history(act):
 @permission_classes([IsAuthenticated])
 def freelancer_milestones(request, workspace_id):
     user = request.user
-    print(f"User: {user.username}, Workspace ID: {workspace_id}")  # Debug log
-
+    
     # 1. Get the workspace where the user is a freelancer participant
     try:
         workspace = Workspace.objects.get(id=workspace_id, participants__user=user, participants__role='freelancer')

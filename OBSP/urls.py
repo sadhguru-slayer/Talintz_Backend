@@ -13,4 +13,9 @@ urlpatterns = [
     
     # New endpoint for fetching draft response data
     path('api/<int:obsp_id>/draft/<str:level>/', views.get_draft_response, name='get_draft_response'),
+
+    # Client side obsps
+     path('api/responses/', views.obsp_response_list, name='obsp_response_list'),
+    path('api/responses/<int:response_id>/', views.obsp_response_detail, name='obsp_response_detail'),
+   
 ]

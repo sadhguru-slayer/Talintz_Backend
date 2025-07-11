@@ -417,6 +417,7 @@ class OBSPMilestone(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    is_automated = models.BooleanField(default=True)
     
     class Meta:
         unique_together = ['template', 'level', 'milestone_type']

@@ -1057,6 +1057,7 @@ class Invitation(models.Model):
     """
     INVITATION_TYPES = [
         ('project_assignment', 'Project Assignment'),
+        ('obsp_invitation', 'OBSP Invitation'),
         ('bid_invitation', 'Bid Invitation'),
         ('interview_request', 'Interview Request'),
         ('collaboration_invite', 'Collaboration Invite'),

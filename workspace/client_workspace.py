@@ -63,6 +63,7 @@ def get_workspace_payment_summary(workspace):
 @permission_classes([IsAuthenticated])
 def client_overview(request, workspace_id):
     user = request.user
+    obsp_response = None  # Initialize to None to avoid UnboundLocalError
 
     try:
         workspace = Workspace.objects.get(
@@ -73,6 +74,7 @@ def client_overview(request, workspace_id):
     except Workspace.DoesNotExist:
         return Response({"error": "Workspace not found or access denied"}, status=404)
 
+    
     # 2. Get the content object (Project or OBSPResponse)
     content_object = workspace.content_object
 
@@ -163,20 +165,39 @@ def client_overview(request, workspace_id):
                 "activity_count": len(activities),
             })
         
-        project_details = {
-            "title": content_object.title,
-            "description": content_object.description,
-            "start_date": content_object.start_date.isoformat() if content_object.start_date else None,
-            "complexity_level": content_object.complexity_level,
-            "category_name": content_object.domain.name if content_object.domain else None,
-            "skills_required": [skill.name for skill in content_object.skills_required.all()],
-            "budget": float(content_object.budget) if content_object.budget else 0,
-            "deadline": content_object.deadline.isoformat() if content_object.deadline else None,
-        }
+        # Debug and handle skills_required
+        try:
+            skills_required_qs = content_object.skills_required.all()  # Get the QuerySet
+            print(f"------------- Skills required: {skills_required_qs}")  # Log the actual QuerySet for debugging
+            project_details = {
+                "title": content_object.title,
+                "description": content_object.description,
+                "start_date": content_object.start_date.isoformat() if content_object.start_date else None,
+                "complexity_level": content_object.complexity_level,
+                "category_name": content_object.domain.name if content_object.domain else None,
+                "skills_required": {
+                
+                "required_skills": [skill.name for skill in skills_required_qs],
+            },
+                "budget": float(content_object.budget) if content_object.budget else 0,
+                "deadline": content_object.deadline.isoformat() if content_object.deadline else None,
+            }
+        except Exception as e:
+            print(f"Error fetching skills: {e}")  # Log any errors
+            project_details = {
+                "title": content_object.title,
+                "description": content_object.description,
+                "start_date": content_object.start_date.isoformat() if content_object.start_date else None,
+                "complexity_level": content_object.complexity_level,
+                "category_name": content_object.domain.name if content_object.domain else None,
+                "skills_required": [],  # Fallback to empty list if skills can't be fetched
+                "budget": float(content_object.budget) if content_object.budget else 0,
+                "deadline": content_object.deadline.isoformat() if content_object.deadline else None,
+            }
 
     elif hasattr(content_object, 'template'):
         # Case: OBSPResponse
-        obsp_response = content_object
+        obsp_response = content_object  # Set it here
         template = obsp_response.template
         selected_level = obsp_response.selected_level
         
@@ -223,11 +244,11 @@ def client_overview(request, workspace_id):
         milestone_progress = obsp_response.milestone_progress or {}
 
         milestones = []
-        
         for milestone in level_milestones:
             milestone_id_str = str(milestone.id)
-            status = milestone_progress.get(milestone_id_str, {}).get('status', milestone.status)  # Fetch status from progress
-            deadline = milestone_progress.get(milestone_id_str, {}).get('deadline', None)  # Fetch deadline from progress (as string)
+            status_value = milestone_progress.get(milestone_id_str, {})
+            status = status_value.get('status', milestone.status) if isinstance(status_value, dict) else milestone.status  # Safely get status
+            deadline = status_value.get('deadline', None) if isinstance(status_value, dict) else None  # Safely get deadline
             
             # Get activities related to this OBSP milestone
             milestone_activities = workspace.activities.filter(
@@ -275,6 +296,47 @@ def client_overview(request, workspace_id):
                 "activities": activities,
                 "activity_count": len(activities),
             })
+        phases_data = obsp_response.responses.get('phases', {})  # Get the phases dictionary
+        client_selections = {}  # New structure for simplified data
+        summary = {  # Build a simple summary
+            'total_price': float(obsp_response.total_price) if obsp_response.total_price else 0,
+            'selected_level': selected_level,
+            'phase_count': len(phases_data),
+            'key_selections': [],  # List of key selected items across phases
+        }
+
+        for phase_key, phase in phases_data.items():
+            selections = phase.get('selections', [])  # List of selected fields
+            print(f"Processing phase: {phase_key}, selections count: {len(selections)}")  # Debugging log
+            
+            # Ensure selections are unique by field_label to prevent duplicates
+            unique_selections = {}
+            for sel in selections:
+                if sel.get('field_label') not in unique_selections:  # Only add if not already present
+                    unique_selections[sel.get('field_label')] = sel
+            
+            client_selections[phase_key] = {
+                'phase_display': phase.get('phase_display', phase_key),
+                'selected_fields': [  # Simplified list of selected fields, now from unique selections
+                    {
+                        'field_label': sel.get('field_label'),
+                        'selected_value': sel.get('selected_value'),
+                        'price_impact': sel.get('price_impact', 0),
+                    } for sel in unique_selections.values() if sel.get('selected_value')
+                ],
+            }
+            
+            # Add key selections to summary, but only for the current phase
+            key_selections_for_phase = []  # Temporary list per phase
+            for sel in selections:
+                if sel.get('is_required', False):
+                    key_selections_for_phase.append({
+                        'field_label': sel.get('field_label'),
+                        'selected_value': sel.get('selected_value'),
+                    })
+            summary['key_selections'].extend(key_selections_for_phase)  # Append only after processing phase
+            
+            print(f"Phase {phase_key} final selected_fields count: {len(client_selections[phase_key]['selected_fields'])}")  # Debugging log
 
         project_details = {
             "title": obsp_level.name,  # Use level name instead of template title
@@ -283,14 +345,15 @@ def client_overview(request, workspace_id):
             "complexity_level": selected_level,
             "category_name": template.category.name if template.category else None,
             "skills_required": {
-                "core_skills": core_skills,
-                "optional_skills": optional_skills,
-                "required_skills": required_skills,
+                "core_skills": [skill.name for skill in (core_skills.all() if hasattr(core_skills, 'all') else core_skills)],
+                "optional_skills": [skill.name for skill in (optional_skills.all() if hasattr(optional_skills, 'all') else optional_skills)],
+                "required_skills": [skill.name for skill in (required_skills.all() if hasattr(required_skills, 'all') else required_skills)],
             },
             "budget": float(obsp_response.total_price) if obsp_response.total_price else 0,
             "deadline": deadline.isoformat() if deadline and isinstance(deadline, (datetime, date)) else deadline,  # Safe check
             "features": features,
             "deliverables": deliverables,
+            "client_selections":client_selections,
         }
 
     # 7. Get workspace activity history (general activities)
@@ -342,6 +405,13 @@ def client_overview(request, workspace_id):
             "milestones": milestones,
         },
         "team": participants,
+        # # Make client_selections conditional
+        # **({"client_selections": {
+        #         "selected_level": obsp_response.selected_level if obsp_response else None,
+        #         "total_price": float(obsp_response.total_price) if obsp_response and obsp_response.total_price else 0,
+        #         "review_phase": obsp_response.responses.get('phases', {}).get('review', {}) if obsp_response else {},
+        #         "summary": obsp_response.responses.get('summary', {}) if obsp_response else {},
+        #     } if obsp_response else {}}),
         "recentMessages": [],  # Empty for now
         "files": files,
         "payments": payments,
@@ -460,7 +530,7 @@ def client_milestones(request, workspace_id):
                 "payout": {
                     "percent": 0,   # Fill as needed
                     "status": m.status,
-                    "autoPay": False
+                    "autoPay":m.is_automated ,
                 },
                 "history": [serialize_history(a, user) for a in milestone_activities],
                 "submissions": regular_submissions,  # Only non-box attachments
@@ -578,8 +648,9 @@ def client_milestones(request, workspace_id):
             ]
             
             milestone_id_str = str(m.id)
-            status = milestone_progress.get(milestone_id_str, {}).get('status', m.status)  # Fetch status from progress
-            deadline = milestone_progress.get(milestone_id_str, {}).get('deadline', None)  # Fetch deadline from progress (as string)
+            status_value = milestone_progress.get(milestone_id_str, {})
+            status = status_value.get('status', m.status) if isinstance(status_value, dict) else m.status  # Safely get status
+            deadline = status_value.get('deadline', None) if isinstance(status_value, dict) else None  # Safely get deadline
             
             milestone_data = {
                 "id": m.id,
@@ -1133,14 +1204,19 @@ def accept_milestone(request, workspace_id, milestone_id):
                 next_milestones.save()  # Optionally, add a timestamp or other fields here
             
         elif isinstance(content_object, OBSPResponse):  # For OBSP
-            milestone_progress = content_object.milestone_progress  # JSON field, e.g., {"1": "in_progress"}
+            milestone_progress = content_object.milestone_progress  # JSON field, e.g., {"1": {"status": "pending", "deadline": "2025-07-24"}}
             
-            # Ensure milestone_id is a string key in milestone_progress
-            milestone_key = str(milestone_id)  # Assuming keys are strings like "1"
+            # Ensure milestone_id is a string key
+            milestone_key = str(milestone_id)
             if milestone_key in milestone_progress:
-                milestone_progress[milestone_key] = 'completed'  # Update status
+                # Update the status in the nested dictionary
+                if isinstance(milestone_progress[milestone_key], dict):  # Check if it's a dictionary
+                    milestone_progress[milestone_key]['status'] = 'completed'  # Update nested status
+                else:
+                    # Fallback if it's not nested (e.g., still a string for backward compatibility)
+                    milestone_progress[milestone_key] = 'completed'
+                
                 content_object.milestone_progress = milestone_progress
-                content_object.save()
                 
                 # Handle feedback
                 if feedback:
@@ -1153,15 +1229,33 @@ def accept_milestone(request, workspace_id, milestone_id):
                         is_aknowledged=False
                     )
                 
-                # New logic: Check for the next milestone in the dictionary and update if pending
-                keys = sorted(milestone_progress.keys())  # Sort keys to determine sequence (e.g., ["1", "2", "3"])
-                current_index = keys.index(milestone_key) if milestone_key in keys else -1
-                if current_index != -1 and current_index + 1 < len(keys):
-                    next_key = keys[current_index + 1]  # Get the next key
-                    if milestone_progress.get(next_key) == 'pending':
-                        milestone_progress[next_key] = 'in_progress'
-                        content_object.milestone_progress = milestone_progress
-                        content_object.save()
+                # New logic: Check for the next milestone
+                if milestone_progress:  # Ensure the dictionary is not empty
+                    keys = sorted(milestone_progress.keys(), key=lambda x: int(x) if x.isdigit() else x)  # Sort numerically if possible
+                    current_index = keys.index(milestone_key) if milestone_key in keys else -1
+                    
+                    if current_index != -1 and current_index + 1 < len(keys):
+                        next_key = keys[current_index + 1]  # Get the next key
+                        next_milestone_data = milestone_progress.get(next_key)
+                        
+                        if isinstance(next_milestone_data, dict) and next_milestone_data.get('status') == 'pending':
+                            next_milestone_data['status'] = 'in_progress'  # Update nested status
+                            milestone_progress[next_key] = next_milestone_data  # Update the dictionary
+                            content_object.milestone_progress = milestone_progress
+                            content_object.save()  # Save the updated progress
+                            
+                            # Add logging for debugging
+                            print(f"Updated next milestone {next_key} to 'in_progress' for OBSPResponse {content_object.id}")
+                        elif not isinstance(next_milestone_data, dict):
+                            print(f"Next milestone {next_key} data is not a dictionary; cannot update status.")
+                        else:
+                            print(f"Next milestone {next_key} is not 'pending'; current status: {next_milestone_data.get('status')}")
+                    else:
+                        print(f"No next milestone found after {milestone_key}")
+                else:
+                    print("milestone_progress is empty; nothing to update")
+                
+                content_object.save()  # Final save to ensure all changes are persisted
             else:
                 return Response({"error": "Milestone not found in progress tracking."}, status=404)
         
@@ -1175,6 +1269,7 @@ def accept_milestone(request, workspace_id, milestone_id):
         return Response({"error": "OBSP Milestone not found."}, status=404)
     except Exception as e:
         return Response({"error": str(e)}, status=500)
+
 
 def raise_dispute(request, workspace_id, milestone_id):
     pass
